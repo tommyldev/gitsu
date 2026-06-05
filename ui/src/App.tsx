@@ -38,6 +38,7 @@ import { HooksManager } from "@/components/hooks/HooksManager";
 import { MergeDialog } from "@/components/merge/MergeDialog";
 import { ConflictEditor } from "@/components/merge/ConflictEditor";
 import { SettingsModal } from "@/components/settings/SettingsModal";
+import { ProjectSwitcher } from "@/components/palette/ProjectSwitcher";
 import { Button, Pill } from "@/components/ui/primitives";
 import {
   GitBranch,
@@ -189,7 +190,7 @@ export default function App() {
         viewHidden={hideGraphPanel}
         onToggleView={toggleHideGraphPanel}
         onOpen={pickAndOpen}
-        onPalette={() => setPaletteOpen(true)}
+        onPalette={() => setPaletteOpen((p) => !p)}
         onCreate={() => setCreateOpen(true)}
         onRefresh={() => {
           refresh();
@@ -376,6 +377,7 @@ function Header({
   viewHidden,
   onToggleView,
   onOpen,
+  onPalette,
   onCreate,
   onRefresh,
   onHooks,
@@ -387,6 +389,7 @@ function Header({
   viewHidden: boolean;
   onToggleView: () => void;
   onOpen: () => void;
+  onPalette: () => void;
   onCreate: () => void;
   onRefresh: () => void;
   onHooks: () => void;
@@ -425,8 +428,19 @@ function Header({
             updated {secondsAgo(lastFetched)}
           </span>
         )}
+        {/* Universal navigation: opens the project switcher palette.
+            Available in both the dashboard and the home view — on
+            home it's the rapid-filter entry into recents; on the
+            dashboard it also surfaces the "← All projects" entry
+            that returns to the projects view. */}
+        <Button onClick={onPalette} title="Project switcher (⌘K / Ctrl+K)">
+          <LayoutGrid size={14} strokeWidth={1.5} /> Projects
+        </Button>
         {repo && (
           <>
+            <Button onClick={onPalette} title="Project switcher (⌘K)">
+              <LayoutGrid size={14} strokeWidth={1.5} /> Switch
+            </Button>
             <Button
               onClick={onToggleView}
               title={

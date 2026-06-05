@@ -122,6 +122,18 @@ export function ProjectSwitcher({ onClose }: Props) {
       e.preventDefault();
       const row = rows[highlight];
       if (row) trigger(row);
+    } else if (e.key === "Escape") {
+      // The global Esc handler in App.tsx bails when an <input> is
+      // focused (to avoid stealing typing), so we close locally.
+      e.preventDefault();
+      onClose();
+    } else if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+      // ⌘K / Ctrl+K toggles the palette. The global handler also
+      // bails on inputs, so we re-implement the toggle here for
+      // symmetry (user can dismiss with the same gesture they used
+      // to open it, even while typing).
+      e.preventDefault();
+      onClose();
     }
   };
 

@@ -24,7 +24,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { listen } from "@tauri-apps/api/event";
 import clsx from "clsx";
-import { ChevronDown, ChevronUp, X, Terminal as TerminalIcon, Rows2, Columns2, Plus } from "lucide-react";
+import { ChevronDown, ChevronUp, X, Terminal as TerminalIcon, Rows2, Columns2, Plus, Maximize2, Minimize2, RotateCcw } from "lucide-react";
 import { useRepoStore } from "@/stores/repo";
 import { useTerminalStore, type Layout, type SplitDir } from "@/stores/terminal";
 import { displayBranch, isDetached } from "@/lib/worktree";
@@ -34,8 +34,21 @@ import { displayBranch, isDetached } from "@/lib/worktree";
 export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boolean }) {
   const repo = useRepoStore((s) => s.repo);
   const worktrees = useRepoStore((s) => s.worktrees?.items ?? []);
-  const [selectedWorktree, setSelectedWorktree] = useSelectedWorktree();
+  const selectedWorktree = useTerminalStore((s) => s.selectedWorktree);
+  const setSelectedWorktree = useTerminalStore((s) => s.setSelectedWorktree);
   const [collapsed, setCollapsed] = useState(false);
+
+  // When a repo opens but no worktree is selected, default to the
+  // repo's main path. Keep this in a small effect so we don't
+  // write to the store on every render.
+  useEffect(() => {
+    if (repo && !selectedWorktree) {
+      setSelectedWorktree(repo.path);
+    }
+    if (!repo && selectedWorktree) {
+      setSelectedWorktree(null);
+    }
+  }, [repo, selectedWorktree, setSelectedWorktree]);
 
   const layout = useTerminalStore((s) =>
     selectedWorktree ? s.layouts.get(selectedWorktree) : undefined,
@@ -43,11 +56,18 @@ export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boo
   const focusedPaneId = useTerminalStore((s) =>
     selectedWorktree ? s.focusedPane.get(selectedWorktree) : undefined,
   );
+  const zoomedPaneId = useTerminalStore((s) =>
+    selectedWorktree ? s.zoomedPane.get(selectedWorktree) ?? null : null,
+  );
   const ensurePane = useTerminalStore((s) => s.ensurePane);
   const splitPane = useTerminalStore((s) => s.splitPane);
   const closePane = useTerminalStore((s) => s.closePane);
   const setRatio = useTerminalStore((s) => s.setRatio);
   const setFocus = useTerminalStore((s) => s.setFocus);
+  const toggleZoom = useTerminalStore((s) => s.toggleZoom);
+  const equalizeSplits = useTerminalStore((s) => s.equalizeSplits);
+  const reopenLastClosed = useTerminalStore((s) => s.reopenLastClosed);
+  const reopenStackSize = useTerminalStore((s) => s.reopenStack.length);
 
   // Count panes for the badge — number of leaves in the tree across
   // all worktrees, or just the session count.
@@ -56,6 +76,15 @@ export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boo
   if (!repo) return null;
   const selectedPath = selectedWorktree ?? repo.path;
   const hasWorktrees = worktrees.length > 0;
+
+  // When zoomed, render only the zoomed pane at full size instead of
+  // the full split tree. If the zoomed pane is missing (e.g. it was
+  // just closed and the store didn't clear zoom in time), fall back
+  // to the normal layout.
+  const renderedLayout =
+    layout && zoomedPaneId
+      ? findPaneById(layout, zoomedPaneId) ?? layout
+      : layout;
 
   return (
     <div
@@ -85,6 +114,42 @@ export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boo
             ) : null,
           )}
         </div>
+        {/* Zoom status / quick-action chip. Visible only when a
+            zoomed pane is in effect. Click to exit zoom. */}
+        {zoomedPaneId && (
+          <button
+            onClick={() => toggleZoom(selectedPath)}
+            className="flex items-center gap-1 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent hover:bg-accent/25 transition-colors duration-150"
+            title="Exit pane zoom (⌘⇧↩)"
+          >
+            <Minimize2 size={10} strokeWidth={1.5} />
+            zoomed
+          </button>
+        )}
+        {/* Equalize splits — only meaningful when the worktree has a layout. */}
+        {layout && layout.kind === "split" && (
+          <button
+            onClick={() => equalizeSplits(selectedPath)}
+            className="rounded p-1 text-fg-muted hover:bg-white/[0.04] hover:text-fg transition-colors duration-150"
+            title="Equalize split sizes (⌃⌘=)"
+          >
+            <Maximize2 size={12} strokeWidth={1.5} />
+          </button>
+        )}
+        {/* Reopen the most recently closed pane (in any worktree).
+            Disabled when the stack is empty. */}
+        <button
+          onClick={() => void reopenLastClosed()}
+          disabled={reopenStackSize === 0}
+          className="rounded p-1 text-fg-muted hover:bg-white/[0.04] hover:text-fg disabled:opacity-30 disabled:hover:bg-transparent transition-colors duration-150"
+          title={
+            reopenStackSize > 0
+              ? "Reopen last closed terminal (⌘⇧T)"
+              : "No recently closed terminals"
+          }
+        >
+          <RotateCcw size={12} strokeWidth={1.5} />
+        </button>
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="rounded p-1 text-fg-muted hover:bg-white/[0.04] transition-colors duration-150"
@@ -97,10 +162,10 @@ export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boo
       {!collapsed && (
         <div className={fillsAvailable ? "min-h-0 flex-1 bg-bg" : "h-72 bg-bg"}>
           {hasWorktrees ? (
-            layout ? (
+            renderedLayout ? (
               <LayoutView
                 worktree={selectedPath}
-                layout={layout}
+                layout={renderedLayout}
                 focusedPaneId={focusedPaneId ?? null}
                 onSplit={splitPane}
                 onClose={closePane}
@@ -545,23 +610,14 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
   );
 }
 
-// ── Local "selected worktree" state (independent of the graph) ─
+// ── Local helpers ──────────────────────────────────────────────
 
-/** The currently "selected" worktree for the terminal strip, used
- * to decide which layout to render. Defaults to the main worktree's
- * path when a repo is opened. Independent of the graph's selected
- * commit, so the user can view one worktree's commits while keeping
- * a shell open in another. */
-function useSelectedWorktree(): [string | null, (path: string | null) => void] {
-  const repo = useRepoStore((s) => s.repo);
-  const [selected, setSelected] = useState<string | null>(null);
-  useEffect(() => {
-    if (repo && selected === null) {
-      setSelected(repo.path);
-    }
-    if (!repo) setSelected(null);
-  }, [repo, selected]);
-  return [selected, setSelected];
+/** Find a pane in the layout tree by id. Returns `null` if the pane
+ * has been removed. The store has a private `findPane`; we duplicate
+ * the small walker here rather than export it just for this case. */
+function findPaneById(layout: Layout, paneId: string): Layout | null {
+  if (layout.kind === "pane") return layout.id === paneId ? layout : null;
+  return findPaneById(layout.a, paneId) ?? findPaneById(layout.b, paneId);
 }
 
 // (no-op — silence the unused-import detector for some build setups)

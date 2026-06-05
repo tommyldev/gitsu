@@ -19,6 +19,18 @@
  * Layouts are in-memory only (reset on app restart). Persisting the
  * tree shape can come later — the SQLite store can hold a JSON blob
  * per worktree if we want to restore on reopen.
+ *
+ * Hotkey-driven extras (cmux-style):
+ *   - `closeOthers`: close every pane in a worktree except the given one
+ *   - `reopenLastClosed`: re-spawn a terminal in the most recently
+ *     closed-from worktree. We don't preserve sessionIds (PTYs are
+ *     not checkpointed), so "reopen" = "spawn fresh in that worktree."
+ *   - `equalizeSplits`: reset every split ratio in a worktree to 0.5
+ *   - `setZoom` / zoomed pane: render only the focused pane in the
+ *     worktree's terminal strip until zoom is toggled off
+ *   - `prevPane` / `nextPane` / `firstPane` / `lastPane`: pre-order
+ *     pane navigation (good enough for small split trees; the
+ *     spatial version is a follow-up)
  */
 
 import { create } from "zustand";
@@ -93,7 +105,34 @@ function removePane(layout: Layout, paneId: string): Layout | null {
   return { ...layout, a, b };
 }
 
+function collectPaneIds(layout: Layout, out: string[] = []): string[] {
+  if (layout.kind === "pane") {
+    out.push(layout.id);
+    return out;
+  }
+  collectPaneIds(layout.a, out);
+  collectPaneIds(layout.b, out);
+  return out;
+}
+
+function mapLayout(layout: Layout, fn: (l: Layout) => Layout): Layout {
+  if (layout.kind === "pane") return fn(layout);
+  return fn({ ...layout, a: mapLayout(layout.a, fn), b: mapLayout(layout.b, fn) });
+}
+
+function firstPaneId(layout: Layout): string | null {
+  if (layout.kind === "pane") return layout.id;
+  return firstPaneId(layout.a) ?? firstPaneId(layout.b);
+}
+
+function firstSessionId(layout: Layout): number | null {
+  if (layout.kind === "pane") return layout.sessionId;
+  return firstSessionId(layout.a) ?? firstSessionId(layout.b);
+}
+
 // ── Store ──────────────────────────────────────────────────────
+
+const REOPEN_STACK_MAX = 10;
 
 interface TerminalState {
   /** All live PTY sessions, keyed by backend id. */
@@ -102,6 +141,14 @@ interface TerminalState {
   layouts: Map<string, Layout>;
   /** Currently-focused pane per worktree, for keystroke routing. */
   focusedPane: Map<string, string>;
+  /** Worktree path whose terminal layout the strip is currently rendering.
+   * Lifted to the store so the App-level hotkey listener can target
+   * split/close/zoom/etc. on the same worktree the user is looking at. */
+  selectedWorktree: string | null;
+  /** Worktree path of the most recently closed pane (capped at REOPEN_STACK_MAX). */
+  reopenStack: string[];
+  /** Per-worktree zoomed paneId. `null`/absent means "show the full tree." */
+  zoomedPane: Map<string, string | null>;
 
   /** Ensure at least one pane exists in the worktree. If one
    * already does, this is a no-op and returns the existing session
@@ -112,10 +159,29 @@ interface TerminalState {
   splitPane: (worktree: string, paneId: string, dir: SplitDir) => Promise<number>;
   /** Close (kill + remove) a pane. Collapses the parent split. */
   closePane: (worktree: string, paneId: string) => Promise<void>;
+  /** Close every pane in the worktree except `keepPaneId`. */
+  closeOthers: (worktree: string, keepPaneId: string) => Promise<void>;
   /** Update a split's ratio (clamped to 0.15..0.85). */
   setRatio: (worktree: string, splitId: string, ratio: number) => void;
   /** Mark a pane as focused (for visual indicator + future input routing). */
   setFocus: (worktree: string, paneId: string) => void;
+
+  /** Set which worktree the terminal strip is rendering. */
+  setSelectedWorktree: (worktree: string | null) => void;
+
+  /** Re-spawn a terminal in the most recently closed-from worktree. */
+  reopenLastClosed: () => Promise<number | null>;
+  /** Reset every split ratio in a worktree to 0.5. */
+  equalizeSplits: (worktree: string) => void;
+
+  /** Toggle zoom on the focused pane. When zoomed, the strip renders only that pane. */
+  toggleZoom: (worktree: string) => void;
+
+  /** Pre-order pane focus navigation. `null` worktrees are no-ops. */
+  focusNextPane: (worktree: string) => void;
+  focusPrevPane: (worktree: string) => void;
+  focusFirstPane: (worktree: string) => void;
+  focusLastPane: (worktree: string) => void;
 
   /** Send input bytes to a session. */
   send: (id: number, data: Uint8Array) => Promise<void>;
@@ -180,6 +246,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
     sessions: new Map(),
     layouts: new Map(),
     focusedPane: new Map(),
+    selectedWorktree: null,
+    reopenStack: [],
+    zoomedPane: new Map(),
 
     ensurePane: async (worktree: string) => {
       // If the worktree already has a layout, return the first
@@ -270,9 +339,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
         const layouts = new Map(s.layouts);
         const sessions = new Map(s.sessions);
         const focused = new Map(s.focusedPane);
+        const zoomed = new Map(s.zoomedPane);
         if (newLayout === null) {
           layouts.delete(worktree);
           focused.delete(worktree);
+          zoomed.delete(worktree);
         } else {
           layouts.set(worktree, newLayout);
           // If the focused pane was removed, focus the next leaf in
@@ -281,6 +352,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
             const next = firstPaneId(newLayout);
             if (next) focused.set(worktree, next);
             else focused.delete(worktree);
+          }
+          // If the zoomed pane was removed, clear zoom for this worktree.
+          if (zoomed.get(worktree) === paneId) {
+            zoomed.delete(worktree);
           }
         }
         if (sessionId != null) {
@@ -295,9 +370,21 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
               }
             });
           }
+          // Track this worktree for reopen-last-closed (⌘⇧T).
+          const stack = [worktree, ...s.reopenStack].slice(0, REOPEN_STACK_MAX);
+          return { layouts, sessions, focusedPane: focused, zoomedPane: zoomed, reopenStack: stack };
         }
-        return { layouts, sessions, focusedPane: focused };
+        return { layouts, sessions, focusedPane: focused, zoomedPane: zoomed };
       });
+    },
+
+    closeOthers: async (worktree, keepPaneId) => {
+      const layout = get().layouts.get(worktree);
+      if (!layout) return;
+      const ids = collectPaneIds(layout);
+      await Promise.all(
+        ids.filter((id) => id !== keepPaneId).map((id) => get().closePane(worktree, id)),
+      );
     },
 
     setRatio: (worktree, splitId, ratio) => {
@@ -321,6 +408,87 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
         focused.set(worktree, paneId);
         return { focusedPane: focused };
       });
+    },
+
+    setSelectedWorktree: (worktree) => {
+      set({ selectedWorktree: worktree });
+    },
+
+    reopenLastClosed: async () => {
+      const [worktree, ...rest] = get().reopenStack;
+      if (!worktree) return null;
+      set({ reopenStack: rest });
+      try {
+        return await get().ensurePane(worktree);
+      } catch (e) {
+        console.warn("reopenLastClosed", e);
+        return null;
+      }
+    },
+
+    equalizeSplits: (worktree) => {
+      const layout = get().layouts.get(worktree);
+      if (!layout) return;
+      const newLayout = mapLayout(layout, (l) =>
+        l.kind === "split" ? { ...l, ratio: 0.5 } : l,
+      );
+      set((s) => {
+        const layouts = new Map(s.layouts);
+        layouts.set(worktree, newLayout);
+        return { layouts };
+      });
+    },
+
+    toggleZoom: (worktree) => {
+      const focused = get().focusedPane.get(worktree);
+      if (!focused) return;
+      set((s) => {
+        const zoomed = new Map(s.zoomedPane);
+        if (zoomed.get(worktree) === focused) {
+          zoomed.delete(worktree);
+        } else {
+          zoomed.set(worktree, focused);
+        }
+        return { zoomedPane: zoomed };
+      });
+    },
+
+    focusNextPane: (worktree) => {
+      const layout = get().layouts.get(worktree);
+      if (!layout) return;
+      const ids = collectPaneIds(layout);
+      if (ids.length === 0) return;
+      const current = get().focusedPane.get(worktree);
+      const idx = current ? ids.indexOf(current) : -1;
+      const next = ids[(idx + 1) % ids.length];
+      if (next) get().setFocus(worktree, next);
+    },
+
+    focusPrevPane: (worktree) => {
+      const layout = get().layouts.get(worktree);
+      if (!layout) return;
+      const ids = collectPaneIds(layout);
+      if (ids.length === 0) return;
+      const current = get().focusedPane.get(worktree);
+      const idx = current ? ids.indexOf(current) : 0;
+      const prev = ids[(idx - 1 + ids.length) % ids.length];
+      if (prev) get().setFocus(worktree, prev);
+    },
+
+    focusFirstPane: (worktree) => {
+      const layout = get().layouts.get(worktree);
+      if (!layout) return;
+      const first = firstPaneId(layout);
+      if (first) get().setFocus(worktree, first);
+    },
+
+    focusLastPane: (worktree) => {
+      const layout = get().layouts.get(worktree);
+      if (!layout) return;
+      // Last in pre-order: right-most leaf. Walk right-leaning splits.
+      let cur: Layout = layout;
+      while (cur.kind === "split") cur = cur.b;
+      get().setFocus(worktree, cur.id);
     },
 
     send: async (id, data) => {
@@ -349,25 +517,17 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
           // ignore
         }
       }
-      set({ sessions: new Map(), layouts: new Map(), focusedPane: new Map() });
+      set({
+        sessions: new Map(),
+        layouts: new Map(),
+        focusedPane: new Map(),
+        selectedWorktree: null,
+        zoomedPane: new Map(),
+        reopenStack: [],
+      });
     },
   };
 });
-
-function mapLayout(layout: Layout, fn: (l: Layout) => Layout): Layout {
-  if (layout.kind === "pane") return fn(layout);
-  return fn({ ...layout, a: mapLayout(layout.a, fn), b: mapLayout(layout.b, fn) });
-}
-
-function firstPaneId(layout: Layout): string | null {
-  if (layout.kind === "pane") return layout.id;
-  return firstPaneId(layout.a) ?? firstPaneId(layout.b);
-}
-
-function firstSessionId(layout: Layout): number | null {
-  if (layout.kind === "pane") return layout.sessionId;
-  return firstSessionId(layout.a) ?? firstSessionId(layout.b);
-}
 
 function parseError(e: unknown): string {
   if (e instanceof WtRpcError) return e.message;
