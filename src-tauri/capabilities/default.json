@@ -1,0 +1,49 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for gitsu's main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:webview:default",
+    "core:app:default",
+    "core:event:default",
+    "core:menu:default",
+    "core:tray:default",
+    "core:path:default",
+    "core:resources:default",
+    "core:image:default",
+    "dialog:default",
+    "fs:default",
+    "fs:allow-read-text-file",
+    "fs:allow-read-dir",
+    "fs:allow-exists",
+    "fs:scope-home-recursive",
+    "fs:scope-document-recursive",
+    "fs:scope-download-recursive",
+    "fs:scope-desktop-recursive",
+    "opener:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "wt",
+          "sidecar": true,
+          "args": [
+            "--format=json"
+          ]
+        }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "wt",
+          "sidecar": true
+        }
+      ]
+    }
+  ]
+}

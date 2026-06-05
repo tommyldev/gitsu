@@ -1,0 +1,61 @@
+[package]
+name = "gitsu"
+version = "0.1.0"
+description = "A worktree-first Git desktop client built on worktrunk"
+authors = ["Tommy"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "gitsu_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-opener = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+parking_lot = "0.12"
+dirs = "5"
+which = "7"
+
+# Git operations (read-heavy, used for graph, diff, blame, status)
+git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+
+# Filesystem watching
+notify = "6"
+notify-debouncer-mini = "0.4"
+
+# SQLite (rusqlite for storage)
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# PTY for in-app terminal
+portable-pty = "0.8"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+# This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

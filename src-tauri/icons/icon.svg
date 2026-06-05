@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#39c5cf"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="#1b1f24"/>
+  <g stroke="url(#g)" stroke-width="48" stroke-linecap="round" fill="none">
+    <!-- main vertical lane (root commit) -->
+    <line x1="380" y1="160" x2="380" y2="864"/>
+    <!-- branch A -->
+    <path d="M 380 380 Q 380 480 540 480 L 700 480"/>
+    <line x1="700" y1="480" x2="700" y2="720"/>
+    <!-- branch B -->
+    <path d="M 380 600 Q 380 700 240 700"/>
+    <line x1="240" y1="700" x2="240" y2="860"/>
+  </g>
+  <!-- commit nodes -->
+  <circle cx="380" cy="160" r="44" fill="#6366f1"/>
+  <circle cx="380" cy="380" r="44" fill="#6366f1"/>
+  <circle cx="700" cy="480" r="44" fill="#57ab5a"/>
+  <circle cx="380" cy="600" r="44" fill="#6366f1"/>
+  <circle cx="700" cy="720" r="44" fill="#57ab5a"/>
+  <circle cx="240" cy="700" r="44" fill="#c69026"/>
+  <circle cx="240" cy="860" r="44" fill="#c69026"/>
+  <circle cx="380" cy="864" r="44" fill="#6366f1"/>
+</svg>
