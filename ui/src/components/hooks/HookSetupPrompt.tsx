@@ -27,13 +27,13 @@ export function HookSetupPrompt() {
   if (snapshot.has_post_start_copy_ignored) return null;
 
   return (
-    <div className="flex items-start gap-3 border-b border-accent/30 bg-accent/10 px-4 py-3 text-sm">
-      <Package size={18} className="mt-0.5 shrink-0 text-accent" />
+    <div className="flex items-start gap-3 border-b border-white/[0.06] bg-bg-panel px-4 py-3 text-[13px] shadow-[0_2px_8px_rgba(0,0,0,0.1)]">
+      <Package size={18} className="mt-0.5 shrink-0 text-accent" strokeWidth={1.5} />
       <div className="flex-1">
         <p className="font-medium text-fg">
           Bring over <code className="font-mono">.env</code> &amp; build caches into new worktrees?
         </p>
-        <p className="mt-0.5 text-xs text-fg-muted">
+        <p className="mt-0.5 text-[11px] text-fg-muted">
           Install gitsu's recommended <code className="font-mono">post-start</code> hook so
           <code className="font-mono">wt step copy-ignored</code> runs on every new worktree.
           Without it, <code className="font-mono">.env</code> and dependency caches live
@@ -43,13 +43,13 @@ export function HookSetupPrompt() {
           <button
             onClick={() => install(repo.path, true)}
             disabled={loading}
-            className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+            className="rounded-md bg-accent px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-colors duration-150"
           >
             {loading ? "Installing…" : "Install recommended setup"}
           </button>
           <button
             onClick={dismiss}
-            className="rounded-md px-2 py-1 text-xs text-fg-muted hover:bg-bg-subtle"
+            className="rounded-md px-2 py-1 text-[11px] text-fg-muted hover:bg-white/[0.04] transition-colors duration-150"
           >
             Not now
           </button>
@@ -57,10 +57,10 @@ export function HookSetupPrompt() {
       </div>
       <button
         onClick={dismiss}
-        className="rounded p-1 text-fg-subtle hover:bg-bg-subtle hover:text-fg"
+        className="rounded p-1 text-fg-muted hover:bg-white/[0.04] hover:text-fg transition-colors duration-150"
         title="Dismiss"
       >
-        <X size={14} />
+        <X size={14} strokeWidth={1.5} />
       </button>
     </div>
   );

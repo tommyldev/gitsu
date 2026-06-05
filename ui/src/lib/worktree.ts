@@ -32,3 +32,27 @@ export function displayBranch(wt: Pick<Worktree, "branch" | "commit" | "statusli
 export function isDetached(wt: Pick<Worktree, "branch">): boolean {
   return wt.branch === null || wt.branch === "";
 }
+
+/**
+ * Sort order for the worktree list. Centralized here so the
+ * `WorktreeList` row order and the `Cmd/Ctrl + N` keyboard shortcut
+ * always agree (shortcut index 1 = top row).
+ *
+ * Order:
+ *   1. `is_current` first (the worktree the user is on)
+ *   2. `is_main` second (the primary / default-branch worktree)
+ *   3. Detached worktrees last
+ *   4. Otherwise alphabetical by displayBranch
+ */
+export function sortWorktrees(list: Worktree[]): Worktree[] {
+  return list.slice().sort((a, b) => {
+    if (a.is_current) return -1;
+    if (b.is_current) return 1;
+    if (a.is_main) return -1;
+    if (b.is_main) return 1;
+    const ka = isDetached(a);
+    const kb = isDetached(b);
+    if (ka !== kb) return ka ? 1 : -1;
+    return displayBranch(a).localeCompare(displayBranch(b));
+  });
+}

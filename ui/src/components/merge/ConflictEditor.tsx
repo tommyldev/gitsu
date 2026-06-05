@@ -153,34 +153,37 @@ export function ConflictEditor() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
       onClick={close}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-bg-subtle bg-bg-panel shadow-2xl"
+        className="modal-panel flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-white/[0.08] bg-bg-panel shadow-[0_4px_24px_rgba(0,0,0,0.4)]"
+        style={{
+          animation: "modal-scale 200ms cubic-bezier(0.25, 0.1, 0.25, 1.0) forwards",
+        }}
       >
-        <header className="flex items-center justify-between border-b border-bg-subtle px-4 py-3">
-          <h2 className="flex items-center gap-2 text-base font-semibold">
-            <GitMerge size={16} className="text-accent" />
+        <header className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3.5">
+          <h2 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-fg">
+            <GitMerge size={16} className="text-accent" strokeWidth={1.5} />
             Resolve conflicts
             <code className="font-mono text-accent">{context.sourceBranch}</code>
-            <ArrowRight size={12} className="text-fg-subtle" />
+            <ArrowRight size={12} className="text-fg-muted" strokeWidth={1.5} />
             <code className="font-mono text-accent">{context.targetBranch}</code>
           </h2>
-          <button onClick={close} className="rounded p-1 hover:bg-bg-subtle">
-            <X size={16} />
+          <button onClick={close} className="rounded p-1 text-fg-muted hover:bg-white/[0.04] transition-colors duration-150">
+            <X size={16} strokeWidth={1.5} />
           </button>
         </header>
 
         <div className="flex flex-1 overflow-hidden">
           {/* File list */}
-          <aside className="w-64 shrink-0 overflow-auto border-r border-bg-subtle bg-bg">
-            <h3 className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-fg-subtle">
+          <aside className="w-64 shrink-0 overflow-auto border-r border-white/[0.06] bg-bg">
+            <h3 className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
               Conflicted files
             </h3>
             {paths.length === 0 ? (
-              <p className="px-3 text-xs text-fg-muted">
+              <p className="px-3 text-[11px] text-fg-muted">
                 No more conflicts. Click <strong>Complete merge</strong> to continue.
               </p>
             ) : (
@@ -193,17 +196,17 @@ export function ConflictEditor() {
                       <button
                         onClick={() => setSelected(p)}
                         className={clsx(
-                          "flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs",
+                          "flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] transition-colors duration-150",
                           isSelected
-                            ? "bg-bg-subtle text-fg"
-                            : "text-fg-muted hover:bg-bg-subtle/50",
+                            ? "bg-white/[0.04] text-fg"
+                            : "text-fg-muted hover:bg-white/[0.02]",
                           isResolved && "opacity-50 line-through",
                         )}
                       >
                         {isResolved ? (
-                          <Check size={12} className="text-success" />
+                          <Check size={12} className="text-success" strokeWidth={1.5} />
                         ) : isSelected ? (
-                          <ChevronRight size={12} className="text-accent" />
+                          <ChevronRight size={12} className="text-accent" strokeWidth={1.5} />
                         ) : (
                           <span className="w-3" />
                         )}
@@ -219,33 +222,33 @@ export function ConflictEditor() {
           {/* Editor */}
           <main className="flex flex-1 flex-col overflow-hidden">
             {error && (
-              <div className="border-b border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+              <div className="border-b border-warning/20 bg-warning/10 px-3 py-2 text-[11px] text-warning">
                 {error}
               </div>
             )}
             {selected && parts ? (
               <div className="flex flex-1 flex-col overflow-hidden">
-                <div className="flex shrink-0 items-center gap-2 border-b border-bg-subtle bg-bg px-3 py-1.5 text-xs">
+                <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] bg-bg px-3 py-1.5 text-[11px]">
                   <code className="font-mono text-fg">{selected}</code>
                   <div className="ml-auto flex items-center gap-1">
                     <button
                       onClick={useOurs}
                       disabled={!parts.ours}
-                      className="rounded border border-bg-subtle bg-bg-panel px-2 py-0.5 text-fg-muted hover:border-accent hover:text-fg disabled:opacity-50"
+                      className="rounded border border-white/[0.08] bg-bg-panel px-2 py-0.5 text-fg-muted hover:border-accent/50 hover:text-fg disabled:opacity-50 transition-colors duration-150"
                     >
                       Use ours
                     </button>
                     <button
                       onClick={useBase}
                       disabled={parts.base === null || parts.base === undefined}
-                      className="rounded border border-bg-subtle bg-bg-panel px-2 py-0.5 text-fg-muted hover:border-accent hover:text-fg disabled:opacity-50"
+                      className="rounded border border-white/[0.08] bg-bg-panel px-2 py-0.5 text-fg-muted hover:border-accent/50 hover:text-fg disabled:opacity-50 transition-colors duration-150"
                     >
                       Use base
                     </button>
                     <button
                       onClick={useTheirs}
                       disabled={!parts.theirs}
-                      className="rounded border border-bg-subtle bg-bg-panel px-2 py-0.5 text-fg-muted hover:border-accent hover:text-fg disabled:opacity-50"
+                      className="rounded border border-white/[0.08] bg-bg-panel px-2 py-0.5 text-fg-muted hover:border-accent/50 hover:text-fg disabled:opacity-50 transition-colors duration-150"
                     >
                       Use theirs
                     </button>
@@ -254,27 +257,27 @@ export function ConflictEditor() {
                 <textarea
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
-                  className="flex-1 resize-none bg-bg p-3 font-mono text-xs leading-relaxed focus:outline-none"
+                  className="flex-1 resize-none bg-bg p-3 font-mono text-[11px] leading-relaxed focus:outline-none text-fg"
                   spellCheck={false}
                 />
-                <div className="flex shrink-0 items-center justify-between border-t border-bg-subtle bg-bg px-3 py-2">
-                  <span className="text-xs text-fg-muted">
+                <div className="flex shrink-0 items-center justify-between border-t border-white/[0.06] bg-bg px-3 py-2">
+                  <span className="text-[11px] text-fg-muted">
                     {resolved.size}/{paths.length + resolved.size} resolved
                   </span>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setSelected(paths[paths.indexOf(selected ?? "") + 1] ?? null)}
                       disabled={paths.length <= 1}
-                      className="rounded-md border border-bg-subtle bg-bg-panel px-2 py-1 text-xs text-fg-muted hover:text-fg disabled:opacity-50"
+                      className="rounded-md border border-white/[0.08] bg-bg-panel px-2 py-1 text-[11px] text-fg-muted hover:text-fg disabled:opacity-50 transition-colors duration-150"
                     >
                       Skip
                     </button>
                     <button
                       onClick={markResolved}
                       disabled={busy}
-                      className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
+                      className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] text-white hover:bg-accent-hover disabled:opacity-50 transition-colors duration-150"
                     >
-                      {busy ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}
+                      {busy ? <Loader2 size={11} className="animate-spin" strokeWidth={1.5} /> : <Check size={11} strokeWidth={1.5} />}
                       Mark resolved
                     </button>
                   </div>
@@ -282,25 +285,25 @@ export function ConflictEditor() {
               </div>
             ) : paths.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 text-fg-muted">
-                <Check size={28} className="text-success" />
-                <p className="text-sm">All conflicts resolved.</p>
+                <Check size={28} className="text-success" strokeWidth={1.5} />
+                <p className="text-[13px]">All conflicts resolved.</p>
                 <button
                   onClick={completeMerge}
                   disabled={phase === "running"}
-                  className="flex items-center gap-1.5 rounded-md bg-accent px-4 py-1.5 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded-md bg-accent px-4 py-1.5 text-[11px] text-white hover:bg-accent-hover disabled:opacity-50 transition-colors duration-150"
                 >
                   {phase === "running" ? (
-                    <Loader2 size={11} className="animate-spin" />
+                    <Loader2 size={11} className="animate-spin" strokeWidth={1.5} />
                   ) : (
-                    <GitMerge size={11} />
+                    <GitMerge size={11} strokeWidth={1.5} />
                   )}
                   Complete merge
                 </button>
               </div>
             ) : (
               <div className="flex flex-1 items-center justify-center text-fg-muted">
-                <Loader2 size={16} className="mr-2 animate-spin" />
-                <span className="text-sm">Loading…</span>
+                <Loader2 size={16} className="mr-2 animate-spin" strokeWidth={1.5} />
+                <span className="text-[13px]">Loading…</span>
               </div>
             )}
           </main>
@@ -308,8 +311,8 @@ export function ConflictEditor() {
 
         {/* Bottom: complete-merge CTA + close */}
         {paths.length > 0 && (
-          <footer className="flex shrink-0 items-center justify-between border-t border-bg-subtle px-4 py-2">
-            <span className="text-xs text-fg-muted">
+          <footer className="flex shrink-0 items-center justify-between border-t border-white/[0.06] px-4 py-2">
+            <span className="text-[11px] text-fg-muted">
               {allResolved
                 ? "All files resolved. Complete the merge to commit."
                 : `Resolve ${paths.length} more file${paths.length === 1 ? "" : "s"} before continuing.`}
@@ -321,7 +324,7 @@ export function ConflictEditor() {
                 disabled={!allResolved || phase === "running"}
                 primary
               >
-                {phase === "running" ? <Loader2 size={11} className="animate-spin" /> : <GitMerge size={11} />}
+                {phase === "running" ? <Loader2 size={11} className="animate-spin" strokeWidth={1.5} /> : <GitMerge size={11} strokeWidth={1.5} />}
                 Complete merge
               </Button>
             </div>
@@ -329,8 +332,8 @@ export function ConflictEditor() {
         )}
 
         {result && result.conflicts.length > 0 && (
-          <div className="m-3 mt-0 flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 p-3 text-xs text-danger">
-            <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <div className="m-3 mt-0 flex items-start gap-2 rounded-md border border-danger/20 bg-danger/10 p-3 text-[11px] text-danger">
+            <AlertCircle size={14} className="mt-0.5 shrink-0" strokeWidth={1.5} />
             <span>
               <code className="font-mono">wt merge</code> reported
               {` ${result.conflicts.length}`} additional conflicts. Open a
@@ -363,7 +366,7 @@ function Button({
       onClick={onClick}
       disabled={disabled}
       className={clsx(
-        "rounded-md px-3 py-1.5 text-xs",
+        "rounded-md px-3 py-1.5 text-[11px] transition-colors duration-150",
         primary
           ? "flex items-center gap-1.5 bg-accent text-white hover:bg-accent-hover disabled:opacity-50"
           : "text-fg-muted hover:text-fg",

@@ -49,28 +49,31 @@ export function MergeDialog() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
       onClick={close}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-bg-subtle bg-bg-panel shadow-2xl"
+        className="modal-panel flex w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-white/[0.08] bg-bg-panel shadow-[0_4px_24px_rgba(0,0,0,0.4)]"
+        style={{
+          animation: "modal-scale 200ms cubic-bezier(0.25, 0.1, 0.25, 1.0) forwards",
+        }}
       >
-        <header className="flex items-center justify-between border-b border-bg-subtle px-4 py-3">
-          <h2 className="flex items-center gap-2 text-base font-semibold">
-            <GitMerge size={16} className="text-accent" />
+        <header className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3.5">
+          <h2 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-fg">
+            <GitMerge size={16} className="text-accent" strokeWidth={1.5} />
             Merge{" "}
             <code className="font-mono text-accent">{context.sourceBranch}</code>{" "}
-            <ArrowRight size={12} className="text-fg-subtle" />{" "}
+            <ArrowRight size={12} className="text-fg-muted" strokeWidth={1.5} />{" "}
             <code className="font-mono text-accent">{context.targetBranch}</code>
           </h2>
-          <button onClick={close} className="rounded p-1 hover:bg-bg-subtle">
-            <X size={16} />
+          <button onClick={close} className="rounded p-1 text-fg-muted hover:bg-white/[0.04] transition-colors duration-150">
+            <X size={16} strokeWidth={1.5} />
           </button>
         </header>
 
-        <div className="px-4 py-3 text-xs text-fg-muted">
-          <code className="font-mono text-fg-subtle">{context.worktree}</code>
+        <div className="px-5 py-2 text-[11px] text-fg-muted">
+          <code className="font-mono text-fg-muted">{context.worktree}</code>
         </div>
 
         <Body />
@@ -90,16 +93,16 @@ function Body() {
   if (phase === "previewing") {
     return (
       <div className="flex items-center justify-center gap-2 px-4 py-10 text-fg-muted">
-        <Loader2 size={14} className="animate-spin" />
-        <span className="text-sm">Computing merge preview…</span>
+        <Loader2 size={14} className="animate-spin" strokeWidth={1.5} />
+        <span className="text-[13px]">Computing merge preview…</span>
       </div>
     );
   }
 
   if (phase === "error" && error) {
     return (
-      <div className="m-4 flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
-        <AlertCircle size={16} className="mt-0.5 shrink-0" />
+      <div className="m-4 flex items-start gap-2 rounded-md border border-danger/20 bg-danger/10 p-3 text-[13px] text-danger">
+        <AlertCircle size={16} className="mt-0.5 shrink-0" strokeWidth={1.5} />
         <span>{error}</span>
       </div>
     );
@@ -108,11 +111,11 @@ function Body() {
   if (phase === "running") {
     return (
       <div className="flex flex-col items-center gap-3 px-4 py-10 text-fg-muted">
-        <Loader2 size={20} className="animate-spin text-accent" />
-        <p className="text-sm">
+        <Loader2 size={20} className="animate-spin text-accent" strokeWidth={1.5} />
+        <p className="text-[13px]">
           Running <code className="font-mono">wt merge</code>…
         </p>
-        <p className="text-xs">
+        <p className="text-[11px]">
           Worktrunk will rebase, squash, and commit on{" "}
           <code className="font-mono">{useMergeStore.getState().context?.targetBranch}</code>.
         </p>
@@ -129,7 +132,7 @@ function Body() {
 
   if (!preview) {
     return (
-      <div className="px-4 py-6 text-sm text-fg-muted">No preview available.</div>
+      <div className="px-4 py-6 text-[13px] text-fg-muted">No preview available.</div>
     );
   }
 
@@ -139,38 +142,38 @@ function Body() {
 function PreviewView({
   preview,
 }: {
-  preview: NonNullable<ReturnType<typeof useMergeStore.getState>["preview"]>;
+  preview: NonNullable<ReturnType<typeof useMergeStore.getState>["preview"] >;
 }) {
   const hasConflicts = preview.conflict_files.length > 0;
   return (
-    <div className="max-h-[60vh] overflow-auto px-4 py-3">
+    <div className="max-h-[60vh] overflow-auto px-5 py-3">
       {/* Summary badges */}
-      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
         {preview.can_fast_forward ? (
-          <span className="rounded-full bg-success/15 px-2 py-0.5 text-success">
+          <span className="rounded-full bg-success/10 px-2 py-0.5 text-success">
             Fast-forward
           </span>
         ) : preview.ahead === 0 && preview.behind === 0 ? (
-          <span className="rounded-full bg-bg-subtle px-2 py-0.5 text-fg-muted">
+          <span className="rounded-full bg-white/[0.05] px-2 py-0.5 text-fg-muted">
             Up to date
           </span>
         ) : (
-          <span className="rounded-full bg-warning/15 px-2 py-0.5 text-warning">
+          <span className="rounded-full bg-warning/10 px-2 py-0.5 text-warning">
             Merge commit
           </span>
         )}
-        <span className="text-fg-subtle">
+        <span className="text-fg-muted">
           {preview.ahead} ahead · {preview.behind} behind
         </span>
       </div>
 
       {hasConflicts && (
-        <div className="mb-3 rounded-md border border-danger/30 bg-danger/10 p-3">
-          <p className="text-sm font-medium text-danger">
+        <div className="mb-3 rounded-md border border-danger/20 bg-danger/10 p-3">
+          <p className="text-[13px] font-medium text-danger">
             {preview.conflict_files.length} conflict
             {preview.conflict_files.length === 1 ? "" : "s"} block the merge.
           </p>
-          <p className="mt-1 text-xs text-fg-muted">
+          <p className="mt-1 text-[11px] text-fg-muted">
             Resolve the conflicts in a terminal or external mergetool
             (gitsu's 3-pane conflict editor lands in M8). Once resolved, run{" "}
             <code className="font-mono">wt merge</code> again.
@@ -179,17 +182,17 @@ function PreviewView({
       )}
 
       {!hasConflicts && preview.clean_files.length === 0 && preview.ahead === 0 && preview.behind === 0 && (
-        <p className="text-sm text-fg-muted">
+        <p className="text-[13px] text-fg-muted">
           The two branches are at the same commit. Nothing to do.
         </p>
       )}
 
       {preview.clean_files.length > 0 && (
         <section className="mb-3">
-          <h3 className="mb-1 text-[10px] uppercase tracking-wider text-fg-subtle">
+          <h3 className="mb-1 text-[10px] uppercase tracking-wider text-fg-muted">
             Files that would change ({preview.clean_files.length})
           </h3>
-          <ul className="max-h-32 overflow-auto rounded-md border border-bg-subtle bg-bg p-2 font-mono text-xs">
+          <ul className="max-h-32 overflow-auto rounded-md border border-white/[0.06] bg-bg p-2 font-mono text-[11px]">
             {preview.clean_files.map((p) => (
               <li key={p} className="px-1.5 py-0.5 text-fg-muted">
                 {p}
@@ -201,10 +204,10 @@ function PreviewView({
 
       {hasConflicts && (
         <section>
-          <h3 className="mb-1 text-[10px] uppercase tracking-wider text-fg-subtle">
+          <h3 className="mb-1 text-[10px] uppercase tracking-wider text-fg-muted">
             Conflicting files
           </h3>
-          <ul className="max-h-32 overflow-auto rounded-md border border-danger/30 bg-danger/5 p-2 font-mono text-xs">
+          <ul className="max-h-32 overflow-auto rounded-md border border-danger/20 bg-danger/5 p-2 font-mono text-[11px]">
             {preview.conflict_files.map((p) => (
               <li key={p} className="px-1.5 py-0.5 text-danger">
                 {p}
@@ -224,20 +227,20 @@ function ConflictResult({ conflicts }: { conflicts: string[] }) {
 
   return (
     <div className="m-4 flex flex-col gap-3">
-      <div className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
-        <AlertCircle size={16} className="mt-0.5 shrink-0" />
+      <div className="flex items-start gap-2 rounded-md border border-danger/20 bg-danger/10 p-3 text-[13px] text-danger">
+        <AlertCircle size={16} className="mt-0.5 shrink-0" strokeWidth={1.5} />
         <div>
           <p>
             <strong>Merge halted.</strong> {conflicts.length} file
             {conflicts.length === 1 ? "" : "s"} conflict.
           </p>
-          <p className="mt-1 text-xs">
+          <p className="mt-1 text-[11px]">
             Use gitsu's conflict editor to resolve them, or open a terminal
             for the manual route.
           </p>
         </div>
       </div>
-      <ul className="max-h-32 overflow-auto rounded-md border border-bg-subtle bg-bg p-2 font-mono text-xs">
+      <ul className="max-h-32 overflow-auto rounded-md border border-white/[0.06] bg-bg p-2 font-mono text-[11px]">
         {conflicts.map((p) => (
           <li key={p} className="px-1.5 py-0.5 text-fg-muted">
             {p}
@@ -247,13 +250,13 @@ function ConflictResult({ conflicts }: { conflicts: string[] }) {
       <div className="flex justify-end gap-2">
         <button
           onClick={() => context && open(context.worktree, 80, 24)}
-          className="flex items-center gap-1.5 rounded-md border border-bg-subtle bg-bg px-3 py-1.5 text-xs hover:border-accent"
+          className="flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-bg px-3 py-1.5 text-[11px] text-fg-muted hover:border-accent/50 hover:text-fg transition-colors duration-150"
         >
-          <TerminalIcon size={12} /> Open terminal
+          <TerminalIcon size={12} strokeWidth={1.5} /> Open terminal
         </button>
         <button
           onClick={enterResolving}
-          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent-hover"
+          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] text-white hover:bg-accent-hover transition-colors duration-150"
         >
           Open conflict editor
         </button>
@@ -294,53 +297,53 @@ function SuccessResult() {
 
   return (
     <div className="m-4 flex flex-col gap-3">
-      <div className="flex items-start gap-2 rounded-md border border-success/30 bg-success/10 p-3 text-sm text-success">
-        <Check size={16} className="mt-0.5 shrink-0" />
+      <div className="flex items-start gap-2 rounded-md border border-success/20 bg-success/10 p-3 text-[13px] text-success">
+        <Check size={16} className="mt-0.5 shrink-0" strokeWidth={1.5} />
         <div>
           <p>
             <strong>Merge complete.</strong>
           </p>
           {result?.commit && (
-            <p className="mt-0.5 text-xs text-fg-muted">
+            <p className="mt-0.5 text-[11px] text-fg-muted">
               New commit <code className="font-mono">{result.commit.slice(0, 7)}</code> on{" "}
               <code className="font-mono">{result.target}</code>.
             </p>
           )}
           {result?.message && (
-            <p className="mt-1 text-xs text-fg-muted">{result.message}</p>
+            <p className="mt-1 text-[11px] text-fg-muted">{result.message}</p>
           )}
         </div>
       </div>
 
       {removed ? (
-        <p className="text-xs text-fg-muted">
+        <p className="text-[11px] text-fg-muted">
           Worktree removed. Refresh to see the updated list.
         </p>
       ) : (
-        <div className="rounded-md border border-bg-subtle bg-bg p-3">
-          <p className="text-sm">
+        <div className="rounded-md border border-white/[0.06] bg-bg p-3">
+          <p className="text-[13px]">
             Clean up the source worktree?
           </p>
-          <p className="mt-0.5 text-xs text-fg-muted">
+          <p className="mt-0.5 text-[11px] text-fg-muted">
             Removes <code className="font-mono">{context?.sourceBranch}</code> worktree and
             the branch.
           </p>
           {removeError && (
-            <p className="mt-2 text-xs text-danger">{removeError}</p>
+            <p className="mt-2 text-[11px] text-danger">{removeError}</p>
           )}
           <div className="mt-2 flex items-center justify-end gap-2">
             <button
               onClick={close}
-              className="rounded-md border border-bg-subtle bg-bg-panel px-3 py-1.5 text-xs hover:border-bg-subtle"
+              className="rounded-md border border-white/[0.08] bg-bg-panel px-3 py-1.5 text-[11px] hover:border-white/[0.12] transition-colors duration-150"
             >
               Keep worktree
             </button>
             <button
               onClick={removeWorktree}
               disabled={removing}
-              className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] text-white hover:bg-accent-hover disabled:opacity-50 transition-colors duration-150"
             >
-              {removing ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+              {removing ? <Loader2 size={11} className="animate-spin" strokeWidth={1.5} /> : <Trash2 size={11} strokeWidth={1.5} />}
               Remove worktree + branch
             </button>
           </div>
@@ -365,22 +368,22 @@ function Footer({ onMerge }: { onMerge: () => void }) {
     !(preview.ahead === 0 && preview.behind === 0);
 
   return (
-    <footer className="flex items-center justify-between gap-2 border-t border-bg-subtle px-4 py-3">
+    <footer className="flex items-center justify-between gap-2 border-t border-white/[0.06] px-5 py-3">
       <div>
         {context && phase === "ready" && (
           <button
             onClick={() => open(context.worktree, 80, 24)}
-            className="flex items-center gap-1.5 rounded-md border border-bg-subtle bg-bg px-2 py-1 text-xs text-fg-muted hover:border-accent hover:text-fg"
+            className="flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-bg px-2 py-1 text-[11px] text-fg-muted hover:border-accent/50 hover:text-fg transition-colors duration-150"
           >
-            <TerminalIcon size={11} /> Open terminal
+            <TerminalIcon size={11} strokeWidth={1.5} /> Open terminal
           </button>
         )}
         {result && result.conflicts.length > 0 && (
           <button
             onClick={() => context && open(context.worktree, 80, 24)}
-            className="flex items-center gap-1.5 rounded-md border border-bg-subtle bg-bg px-2 py-1 text-xs text-fg-muted hover:border-accent hover:text-fg"
+            className="flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-bg px-2 py-1 text-[11px] text-fg-muted hover:border-accent/50 hover:text-fg transition-colors duration-150"
           >
-            <TerminalIcon size={11} /> Open terminal
+            <TerminalIcon size={11} strokeWidth={1.5} /> Open terminal
           </button>
         )}
       </div>
@@ -388,10 +391,10 @@ function Footer({ onMerge }: { onMerge: () => void }) {
         <button
           onClick={close}
           className={clsx(
-            "rounded-md px-3 py-1.5 text-xs",
+            "rounded-md px-3 py-1.5 text-[11px] transition-colors duration-150",
             phase === "done"
-              ? "bg-bg-subtle text-fg hover:bg-bg"
-              : "border border-bg-subtle bg-bg-panel text-fg-muted hover:text-fg",
+              ? "bg-white/[0.05] text-fg hover:bg-white/[0.08]"
+              : "border border-white/[0.08] bg-bg-panel text-fg-muted hover:text-fg",
           )}
         >
           {phase === "done" ? "Close" : "Cancel"}
@@ -400,9 +403,9 @@ function Footer({ onMerge }: { onMerge: () => void }) {
           <button
             onClick={onMerge}
             disabled={!canMerge}
-            className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs text-white hover:bg-accent-hover disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] text-white hover:bg-accent-hover disabled:opacity-50 transition-colors duration-150"
           >
-            <GitMerge size={11} /> Merge
+            <GitMerge size={11} strokeWidth={1.5} /> Merge
           </button>
         )}
       </div>

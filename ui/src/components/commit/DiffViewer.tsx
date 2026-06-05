@@ -62,19 +62,19 @@ export function DiffViewer({ files, loading }: Props) {
   if (loading) {
     return (
       <div className="flex items-center justify-center p-6 text-fg-muted">
-        <span className="animate-pulse text-sm">Loading diff…</span>
+        <span className="animate-pulse text-[13px]">Loading diff…</span>
       </div>
     );
   }
   if (files.length === 0) {
     return (
-      <div className="flex items-center justify-center p-6 text-sm text-fg-muted">
+      <div className="flex items-center justify-center p-6 text-[13px] text-fg-muted">
         No changes.
       </div>
     );
   }
   return (
-    <div className="divide-y divide-bg-subtle">
+    <div className="divide-y divide-white/[0.04]">
       {files.map((f) => {
         const key = f.new_path ?? f.old_path ?? "(unknown)";
         return (
@@ -107,14 +107,14 @@ function FileDiffRow({
     <div>
       <button
         onClick={onToggle}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs hover:bg-bg-subtle"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] hover:bg-white/[0.03] transition-colors duration-150"
       >
-        {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <Icon size={12} className={tone} />
+        {isOpen ? <ChevronDown size={12} strokeWidth={1.5} /> : <ChevronRight size={12} strokeWidth={1.5} />}
+        <Icon size={12} className={tone} strokeWidth={1.5} />
         <span className={clsx("shrink-0", tone)}>{file.status}</span>
-        <span className="truncate">{path}</span>
+        <span className="truncate text-fg">{path}</span>
         {file.is_binary ? (
-          <span className="ml-auto rounded bg-bg-subtle px-1.5 py-0.5 text-[10px] text-fg-subtle">
+          <span className="ml-auto rounded bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-fg-muted">
             binary
           </span>
         ) : (
@@ -148,7 +148,7 @@ function UnifiedPatch({ patch }: { patch: string }) {
               (line.kind === "meta" || line.kind === "context") && "text-fg",
             )}
           >
-            <span className="inline-block w-12 shrink-0 select-none pr-2 text-right text-fg-subtle">
+            <span className="inline-block w-12 shrink-0 select-none pr-2 text-right text-fg-muted">
               {line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
             </span>
             <span className="whitespace-pre">{line.content}</span>

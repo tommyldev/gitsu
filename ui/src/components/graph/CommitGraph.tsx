@@ -36,15 +36,16 @@ const COL_AUTHOR = 110;
 const COL_DATE = 75;
 const COL_MESSAGE = 240;
 
+// Desaturated, monochrome-friendly lane palette
 const LANE_COLORS = [
-  "#6366f1", // accent (indigo)
-  "#57ab5a", // success (green)
-  "#c69026", // warning (amber)
-  "#e5534b", // danger (red)
-  "#b083f0", // purple
-  "#39c5cf", // cyan
-  "#f0883e", // orange
-  "#db61a2", // pink
+  "#5E6AD2", // accent (desaturated blue)
+  "#6B7280", // cool gray
+  "#9CA3AF", // lighter gray
+  "#D1D5DB", // light gray
+  "#A1A1AA", // muted gray
+  "#7E82A6", // blue-gray
+  "#8B8FA3", // slate
+  "#787C8E", // dark slate
 ];
 
 export function CommitGraph() {
@@ -78,21 +79,21 @@ export function CommitGraph() {
   if (loading && !graph) {
     return (
       <div className="flex h-full items-center justify-center text-fg-muted">
-        <span className="animate-pulse">Loading commit graph…</span>
+        <span className="animate-pulse text-[13px]">Loading commit graph…</span>
       </div>
     );
   }
   if (error) {
     return (
-      <div className="m-4 flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
-        <AlertCircle size={16} className="mt-0.5 shrink-0" />
+      <div className="m-4 flex items-start gap-2 rounded-md border border-danger/20 bg-danger/10 p-3 text-[13px] text-danger">
+        <AlertCircle size={16} className="mt-0.5 shrink-0" strokeWidth={1.5} />
         <span>{error}</span>
       </div>
     );
   }
   if (!graph || !layout || layout.rows.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-fg-muted">
+      <div className="flex h-full items-center justify-center text-fg-muted text-[13px]">
         No commits in this worktree.
       </div>
     );
@@ -129,6 +130,12 @@ export function CommitGraph() {
         viewBox={`0 0 ${totalWidth} ${totalHeight}`}
         style={{ display: "block" }}
       >
+        <defs>
+          <linearGradient id="accent-fade" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(94,106,210,0.6)" />
+            <stop offset="100%" stopColor="rgba(94,106,210,0)" />
+          </linearGradient>
+        </defs>
         {/* Edges first (so circles sit on top of them) */}
         <g>
           {layout.edges.map((edge, i) => (
@@ -329,13 +336,23 @@ function CommitRow({
     >
       {/* Row background for selection */}
       {selected && (
-        <rect
-          x={0}
-          y={y}
-          width={totalWidth}
-          height={ROW_HEIGHT}
-          fill="rgba(99, 102, 241, 0.12)"
-        />
+        <>
+          <rect
+            x={0}
+            y={y}
+            width={totalWidth}
+            height={ROW_HEIGHT}
+            fill="rgba(94, 106, 210, 0.06)"
+          />
+          {/* Subtle left accent border fading to transparent */}
+          <rect
+            x={0}
+            y={y}
+            width={2}
+            height={ROW_HEIGHT}
+            fill="url(#accent-fade)"
+          />
+        </>
       )}
 
       {/* Dotted connecting line from labels to node (if labels exist) */}
@@ -345,10 +362,10 @@ function CommitRow({
           y1={midY}
           x2={cx - CIRCLE_R - 2}
           y2={midY}
-          stroke="#444c56"
+          stroke="#6B7080"
           strokeWidth={1}
-          strokeDasharray="2,2"
-          opacity={0.5}
+          strokeDasharray="3,3"
+          opacity={0.9}
         />
       )}
 
@@ -357,7 +374,7 @@ function CommitRow({
         cx={cx}
         cy={midY}
         r={CIRCLE_R + 1}
-        fill={selected ? "#1b1f24" : "#22272e"}
+        fill={selected ? "#1A1B1D" : "#222326"}
         stroke={color}
         strokeWidth={1.5}
       />
@@ -378,7 +395,7 @@ function CommitRow({
             x={firstBranch ? branchLabelWidth(firstBranch.name) + 4 : 0}
             dominantBaseline="central"
             fontSize={10}
-            fill="#768390"
+            fill="#5C616B"
             fontFamily="ui-monospace, SFMono-Regular, monospace"
           >
             +{otherBranchCount}
@@ -398,7 +415,7 @@ function CommitRow({
             }
             dominantBaseline="central"
             fontSize={10}
-            fill="#768390"
+            fill="#5C616B"
             fontFamily="ui-monospace, SFMono-Regular, monospace"
           >
             +{otherTagCount}
@@ -412,7 +429,7 @@ function CommitRow({
         y={midY}
         dominantBaseline="central"
         fontSize={10}
-        fill="#cdd9e5"
+        fill="#8A8F98"
         fontFamily="ui-sans-serif, system-ui, sans-serif"
       >
         {truncate(node.author_name || "?", 14)}
@@ -424,7 +441,7 @@ function CommitRow({
         y={midY}
         dominantBaseline="central"
         fontSize={10}
-        fill="#768390"
+        fill="#5C616B"
         fontFamily="ui-monospace, SFMono-Regular, monospace"
       >
         {relativeTime(node.author_time)}
@@ -436,7 +453,7 @@ function CommitRow({
         y={midY}
         dominantBaseline="central"
         fontSize={11}
-        fill="#cdd9e5"
+        fill="#F4F5F8"
         fontFamily="ui-sans-serif, system-ui, sans-serif"
       >
         <title>{node.summary}</title>
@@ -459,7 +476,11 @@ function BranchLabel({ branch }: { branch: { name: string; is_local: boolean } }
         width={w}
         height={16}
         rx={3}
-        fill={branch.is_local ? "rgba(99, 102, 241, 0.18)" : "rgba(80, 90, 110, 0.3)"}
+        fill={branch.is_local ? "rgba(94, 106, 210, 0.15)" : "rgba(80, 90, 110, 0.25)"}
+        style={{
+          stroke: branch.is_local ? "rgba(94, 106, 210, 0.22)" : "rgba(255, 255, 255, 0.06)",
+          strokeWidth: 1,
+        }}
       />
       <text
         x={8}
@@ -467,7 +488,7 @@ function BranchLabel({ branch }: { branch: { name: string; is_local: boolean } }
         dominantBaseline="central"
         fontSize={10}
         fontFamily="ui-monospace, SFMono-Regular, monospace"
-        fill={branch.is_local ? "#a5a8f0" : "#9ba4b3"}
+        fill={branch.is_local ? "#8A8F98" : "#6B7280"}
       >
         {display}
       </text>
@@ -486,7 +507,11 @@ function TagLabel({ tag, xOffset }: { tag: { name: string; is_annotated: boolean
         width={w}
         height={16}
         rx={3}
-        fill="rgba(199, 158, 234, 0.18)"
+        fill="rgba(120, 124, 142, 0.15)"
+        style={{
+          stroke: "rgba(255, 255, 255, 0.06)",
+          strokeWidth: 1,
+        }}
       />
       <text
         x={8}
@@ -494,10 +519,10 @@ function TagLabel({ tag, xOffset }: { tag: { name: string; is_annotated: boolean
         dominantBaseline="central"
         fontSize={10}
         fontFamily="ui-monospace, SFMono-Regular, monospace"
-        fill="#c79aea"
+        fill="#8A8F98"
       >
         <tspan>{display}</tspan>
-        {tag.is_annotated && <tspan dx={2} fill="#dbb6f3">*</tspan>}
+        {tag.is_annotated && <tspan dx={2} fill="#6B7280">*</tspan>}
       </text>
     </g>
   );

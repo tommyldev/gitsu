@@ -70,88 +70,93 @@ export function RemoveWorktreeDialog({ worktree, onClose, onRemoved }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
       onClick={onClose}
     >
       <form
         onClick={(e) => e.stopPropagation()}
         onSubmit={submit}
-        className="w-full max-w-md rounded-lg border border-bg-subtle bg-bg-panel p-5 shadow-2xl"
+        className="modal-panel w-full max-w-md overflow-hidden rounded-lg border border-white/[0.08] bg-bg-panel shadow-[0_4px_24px_rgba(0,0,0,0.4)]"
+        style={{
+          animation: "modal-scale 200ms cubic-bezier(0.25, 0.1, 0.25, 1.0) forwards",
+        }}
       >
-        <header className="mb-4 flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <Trash2 size={18} className="text-danger" /> Remove worktree
+        <header className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3.5">
+          <h2 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-fg">
+            <Trash2 size={18} className="text-danger" strokeWidth={1.5} /> Remove worktree
           </h2>
-          <button type="button" onClick={onClose} className="rounded p-1 hover:bg-bg-subtle">
-            <X size={16} />
+          <button type="button" onClick={onClose} className="rounded p-1 text-fg-muted hover:bg-white/[0.04] transition-colors duration-150">
+            <X size={16} strokeWidth={1.5} />
           </button>
         </header>
 
-        <p className="mb-3 text-sm text-fg-muted">
-          You're about to remove the worktree for{" "}
-          <code className="rounded bg-bg-subtle px-1.5 py-0.5 font-mono text-fg">{worktree.branch}</code>.
-        </p>
-
-        {blockedReason ? (
-          <div className="mb-3 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-            <span>{blockedReason}</span>
-          </div>
-        ) : (
-          <>
-            <label className="mb-2 flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={deleteBranch}
-                onChange={(e) => setDeleteBranch(e.target.checked)}
-                className="h-4 w-4 rounded border-bg-subtle bg-bg-panel accent-accent"
-              />
-              <span>
-                Also delete branch <code className="font-mono text-xs">{worktree.branch}</code>
-              </span>
-            </label>
-
-            {isDirty && (
-              <div className="mb-3 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-                <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                <div>
-                  <p className="mb-1">This worktree has uncommitted changes.</p>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={force}
-                      onChange={(e) => setForce(e.target.checked)}
-                      className="h-4 w-4 rounded border-bg-subtle bg-bg-panel accent-danger"
-                    />
-                    <span>Force remove (discard uncommitted changes)</span>
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {isDirty && force && (
-              <label className="mb-3 block text-sm">
-                <span className="mb-1 block text-fg-muted">
-                  Type <code className="font-mono text-danger">{worktree.branch}</code> to confirm
-                </span>
-                <input
-                  className="input font-mono"
-                  value={typed}
-                  onChange={(e) => setTyped(e.target.value)}
-                  placeholder={worktree.branch ?? "branch"}
-                />
-              </label>
-            )}
-          </>
-        )}
-
-        {error && (
-          <p className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
-            {error}
+        <div className="space-y-4 p-5">
+          <p className="text-[13px] text-fg-muted">
+            You're about to remove the worktree for{" "}
+            <code className="rounded bg-bg px-1.5 py-0.5 font-mono text-[12px] text-fg">{worktree.branch}</code>.
           </p>
-        )}
 
-        <footer className="flex items-center justify-between gap-2">
+          {blockedReason ? (
+            <div className="flex items-start gap-2 rounded-md border border-warning/20 bg-warning/10 p-3 text-[13px] text-warning">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" strokeWidth={1.5} />
+              <span>{blockedReason}</span>
+            </div>
+          ) : (
+            <>
+              <label className="flex items-center gap-2.5 text-[13px]">
+                <input
+                  type="checkbox"
+                  checked={deleteBranch}
+                  onChange={(e) => setDeleteBranch(e.target.checked)}
+                  className="h-4 w-4 rounded border-white/[0.08] bg-bg accent-accent"
+                />
+                <span className="text-fg">
+                  Also delete branch <code className="font-mono text-[11px]">{worktree.branch}</code>
+                </span>
+              </label>
+
+              {isDirty && (
+                <div className="flex items-start gap-2 rounded-md border border-warning/20 bg-warning/10 p-3 text-[13px] text-warning">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0" strokeWidth={1.5} />
+                  <div>
+                    <p className="mb-1">This worktree has uncommitted changes.</p>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={force}
+                        onChange={(e) => setForce(e.target.checked)}
+                        className="h-4 w-4 rounded border-white/[0.08] bg-bg accent-danger"
+                      />
+                      <span>Force remove (discard uncommitted changes)</span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {isDirty && force && (
+                <label className="block text-[13px]">
+                  <span className="mb-1.5 block text-fg-muted text-[12px]">
+                    Type <code className="font-mono text-danger">{worktree.branch}</code> to confirm
+                  </span>
+                  <input
+                    className="input font-mono text-[13px]"
+                    value={typed}
+                    onChange={(e) => setTyped(e.target.value)}
+                    placeholder={worktree.branch ?? "branch"}
+                  />
+                </label>
+              )}
+            </>
+          )}
+
+          {error && (
+            <p className="rounded-md border border-danger/20 bg-danger/10 px-3 py-2 text-[12px] text-danger">
+              {error}
+            </p>
+          )}
+        </div>
+
+        <footer className="flex items-center justify-between border-t border-white/[0.06] px-5 py-3.5">
           <Pill tone="default">{worktree.path}</Pill>
           <div className="flex items-center gap-2">
             <Button type="button" onClick={onClose}>

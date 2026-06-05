@@ -80,39 +80,39 @@ export function CommitContextMenu({ target, onClose }: { target: CommitMenuTarge
   return (
     <div
       ref={ref}
-      className="fixed z-50 min-w-[220px] rounded-md border border-bg-subtle bg-bg-panel py-1 shadow-2xl"
+      className="fixed z-50 min-w-[220px] overflow-hidden rounded-lg border border-white/[0.08] bg-bg-panel py-1 shadow-2xl"
       style={{
         top: "50%",
         left: "50%",
         transform: "translate(-50%, -50%)",
       }}
     >
-      <header className="flex items-center justify-between border-b border-bg-subtle px-3 py-2">
-        <span className="font-mono text-xs text-fg-muted">{target.shortSha}</span>
-        <button onClick={onClose} className="rounded p-0.5 hover:bg-bg-subtle">
-          <X size={12} />
+      <header className="flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
+        <span className="font-mono text-[11px] text-fg-muted">{target.shortSha}</span>
+        <button onClick={onClose} className="rounded p-0.5 text-fg-muted hover:bg-white/[0.04] transition-colors duration-150">
+          <X size={12} strokeWidth={1.5} />
         </button>
       </header>
-      <p className="line-clamp-2 px-3 py-1.5 text-xs text-fg-muted" title={target.summary}>
+      <p className="line-clamp-2 px-3 py-1.5 text-[11px] text-fg-muted" title={target.summary}>
         {target.summary}
       </p>
-      <ul className="border-t border-bg-subtle">
-        <MenuItem icon={<Copy size={13} />} onClick={() => copy(target.sha)}>
+      <ul className="border-t border-white/[0.06]">
+        <MenuItem icon={<Copy size={13} strokeWidth={1.5} />} onClick={() => copy(target.sha)}>
           Copy full SHA
         </MenuItem>
-        <MenuItem icon={<Hash size={13} />} onClick={() => copy(target.shortSha)}>
+        <MenuItem icon={<Hash size={13} strokeWidth={1.5} />} onClick={() => copy(target.shortSha)}>
           Copy short SHA
         </MenuItem>
-        <MenuItem icon={<GitBranch size={13} />} onClick={createWorktree}>
+        <MenuItem icon={<GitBranch size={13} strokeWidth={1.5} />} onClick={createWorktree}>
           Create worktree at this commit…
         </MenuItem>
         {target.branches.length > 0 && (
           <>
-            <li className="mt-1 border-t border-bg-subtle px-3 pb-1 pt-2 text-[10px] uppercase tracking-wider text-fg-subtle">
+            <li className="mt-1 border-t border-white/[0.06] px-3 pb-1 pt-2 text-[10px] uppercase tracking-wider text-fg-muted">
               Pointed at by
             </li>
             {target.branches.slice(0, 5).map((b) => (
-              <li key={b.name} className="px-3 py-1 font-mono text-xs text-fg-muted">
+              <li key={b.name} className="px-3 py-1 font-mono text-[11px] text-fg-muted">
                 {b.name} {b.is_local ? "" : "(remote)"}
               </li>
             ))}
@@ -136,9 +136,9 @@ function MenuItem({
     <li>
       <button
         onClick={onClick}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-fg hover:bg-bg-subtle"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-fg hover:bg-white/[0.04] transition-colors duration-150"
       >
-        <span className="text-fg-subtle">{icon}</span>
+        <span className="text-fg-muted">{icon}</span>
         {children}
       </button>
     </li>

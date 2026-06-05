@@ -19,10 +19,27 @@ interface GraphState {
   error: string | null;
   lastFetched: number | null;
   selectedSha: string | null;
-  /** Path the graph was fetched for. Used to detect worktree switches. */
+  /**
+   * Path the graph was fetched for. Used to detect worktree switches
+   * and to drive the worktree-list row highlight.
+   *
+   * Note: this can diverge from `wt list`'s `is_current` — the user
+   * can view a graph for any worktree without `cd`-ing the OS-level
+   * current. That divergence is intentional: the gitsu "active
+   * worktree" is a UI concept, the worktrunk "current worktree" is a
+   * shell concept.
+   */
+  activePath: string | null;
+  /** Alias kept for backwards compat with existing readers. */
   fetchedFor: string | null;
 
   fetch: (worktreePath: string) => Promise<void>;
+  /**
+   * Switch the active worktree. Triggers a graph fetch for the new
+   * path; clears the selected commit (the new graph starts on HEAD).
+   * Pass `null` to clear (e.g. on repo close).
+   */
+  setActive: (worktreePath: string | null) => Promise<void>;
   select: (sha: string | null) => void;
   clear: () => void;
 }
@@ -36,6 +53,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   error: null,
   lastFetched: null,
   selectedSha: null,
+  activePath: null,
   fetchedFor: null,
 
   fetch: async (worktreePath: string) => {
@@ -57,12 +75,27 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         loading: false,
         error: null,
         lastFetched: Date.now(),
+        activePath: worktreePath,
         fetchedFor: worktreePath,
         selectedSha,
       });
     } catch (e) {
       set({ loading: false, error: parseError(e) });
     }
+  },
+
+  setActive: async (worktreePath: string | null) => {
+    if (worktreePath === null) {
+      set({ activePath: null, fetchedFor: null });
+      return;
+    }
+    // Same path → no-op (graph already loaded).
+    if (get().activePath === worktreePath && get().graph) return;
+    // Clear selection so the new graph starts on HEAD; the
+    // right-pane commit panel relies on selectedSha matching a node
+    // in `graph`.
+    set({ selectedSha: null, activePath: worktreePath });
+    await get().fetch(worktreePath);
   },
 
   select: (sha) => set({ selectedSha: sha }),
@@ -75,6 +108,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       error: null,
       lastFetched: null,
       selectedSha: null,
+      activePath: null,
       fetchedFor: null,
     }),
 }));

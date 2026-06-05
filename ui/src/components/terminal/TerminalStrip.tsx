@@ -18,7 +18,7 @@ import { useRepoStore } from "@/stores/repo";
 import { useTerminalStore } from "@/stores/terminal";
 import { useSelectedWorktree } from "./selectors";
 
-export function TerminalStrip() {
+export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boolean }) {
   const repo = useRepoStore((s) => s.repo);
   const sessions = useTerminalStore((s) => s.sessions);
   const open = useTerminalStore((s) => s.open);
@@ -29,14 +29,27 @@ export function TerminalStrip() {
   if (!repo) return null;
   const worktreeList = Array.from(sessions.values());
 
+  // `fillsAvailable` is true when the graph/commit panel is hidden,
+  // so the terminal takes its place in the same flex row (and most
+  // of the view). Otherwise the terminal is a fixed-height bottom
+  // strip.
   return (
-    <div className="flex shrink-0 flex-col border-t border-bg-subtle bg-bg-panel">
-      <header className="flex h-8 shrink-0 items-center gap-1 border-b border-bg-subtle px-2">
-        <TerminalIcon size={12} className="text-fg-muted" />
+    <div
+      className={clsx(
+        "relative flex flex-col bg-bg-panel shadow-[0_-2px_12px_rgba(0,0,0,0.15)]",
+        fillsAvailable
+          ? "min-w-0 flex-1 border-l border-white/[0.06]"
+          : "shrink-0 border-t border-white/[0.06]",
+      )}
+    >
+      {/* Subtle top edge light */}
+      {!fillsAvailable && <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/[0.04] to-transparent" />}
+      <header className="flex h-8 shrink-0 items-center gap-1 border-b border-white/[0.06] px-2">
+        <TerminalIcon size={12} className="text-fg-muted" strokeWidth={1.5} />
         <span className="text-[11px] font-semibold uppercase tracking-wider text-fg-muted">
           Terminal
         </span>
-        <span className="ml-1 text-[10px] text-fg-subtle">
+        <span className="ml-1 text-[10px] text-fg-muted">
           ({worktreeList.length})
         </span>
         <div className="ml-2 flex flex-1 items-center gap-1 overflow-x-auto">
@@ -53,16 +66,16 @@ export function TerminalStrip() {
         </div>
         <button
           onClick={() => setOpen((o) => !o)}
-          className="rounded p-1 text-fg-muted hover:bg-bg-subtle"
+          className="rounded p-1 text-fg-muted hover:bg-white/[0.04] transition-colors duration-150"
           title={open_ ? "Hide terminal" : "Show terminal"}
         >
-          {open_ ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+          {open_ ? <ChevronDown size={12} strokeWidth={1.5} /> : <ChevronUp size={12} strokeWidth={1.5} />}
         </button>
       </header>
       {open_ && (
-        <div className="h-72 bg-bg">
+        <div className={fillsAvailable ? "min-h-0 flex-1 bg-bg" : "h-72 bg-bg"}>
           {worktreeList.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-sm text-fg-muted">
+            <div className="flex h-full items-center justify-center text-[13px] text-fg-muted">
               No terminals open.
             </div>
           ) : (
@@ -116,8 +129,8 @@ function Tab({
     <div
       onClick={onSelect}
       className={clsx(
-        "group flex shrink-0 cursor-pointer items-center gap-1.5 rounded px-2 py-0.5 text-xs",
-        active ? "bg-bg text-fg" : "text-fg-muted hover:bg-bg-subtle",
+        "group flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 py-0.5 text-[11px] transition-colors duration-150",
+        active ? "bg-white/[0.05] text-fg" : "text-fg-muted hover:bg-white/[0.03]",
       )}
     >
       <span className={clsx("h-1.5 w-1.5 rounded-full", dot)} />
@@ -127,9 +140,9 @@ function Tab({
           e.stopPropagation();
           onClose();
         }}
-        className="rounded p-0.5 text-fg-subtle opacity-0 hover:bg-bg-subtle group-hover:opacity-100"
+        className="rounded p-0.5 text-fg-muted opacity-0 hover:bg-white/[0.04] group-hover:opacity-100 transition-opacity duration-150"
       >
-        <X size={10} />
+        <X size={10} strokeWidth={1.5} />
       </button>
     </div>
   );
@@ -145,10 +158,10 @@ function NewTerminalButton({
   return (
     <button
       onClick={() => onSpawn(selectedWorktree)}
-      className="absolute bottom-12 right-4 flex items-center gap-1 rounded-md border border-bg-subtle bg-bg-panel px-2 py-1 text-xs text-fg-muted opacity-0 transition-opacity hover:text-fg group-hover:opacity-100"
+      className="absolute bottom-12 right-4 flex items-center gap-1 rounded-md border border-white/[0.08] bg-bg-panel px-2 py-1 text-[11px] text-fg-muted opacity-0 transition-opacity duration-150 hover:text-fg group-hover:opacity-100"
       title={`Spawn shell in ${selectedWorktree}`}
     >
-      <RefreshCw size={11} /> New terminal
+      <RefreshCw size={11} strokeWidth={1.5} /> New terminal
     </button>
   );
 }
@@ -173,10 +186,10 @@ function TerminalTab({
       fontSize: 12,
       cursorBlink: true,
       theme: {
-        background: "#1b1f24",
-        foreground: "#cdd9e5",
-        cursor: "#cdd9e5",
-        selectionBackground: "#3d434b",
+        background: "#1A1B1D",
+        foreground: "#8A8F98",
+        cursor: "#8A8F98",
+        selectionBackground: "#3A3D44",
       },
       cols: 80,
       rows: 24,
@@ -240,17 +253,17 @@ function TerminalTab({
     <div className="relative h-full w-full">
       <div ref={containerRef} className="h-full w-full" />
       {status === "spawning" && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-fg-muted">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-fg-muted">
           Spawning shell…
         </div>
       )}
       {status === "exited" && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-fg-subtle">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-fg-subtle">
           Shell exited. Close this tab to clean up.
         </div>
       )}
       {status === "error" && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-danger">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-danger">
           Failed to spawn shell.
         </div>
       )}

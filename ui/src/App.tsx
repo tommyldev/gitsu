@@ -3,13 +3,17 @@
  *
  * Routes between:
  *   - Home: recents list + "Open repo" button
- *   - Dashboard: 3-pane worktree-first view
- *     (worktrees | graph | commit panel)
- *     with a bottom strip for per-worktree terminals
+ *   - Dashboard: worktree-first view, two layouts
+ *       1. 3-pane: worktrees | graph | commit panel, with a bottom
+ *          terminal strip for per-worktree shells
+ *       2. Sidebar: worktrees (fixed) | terminal (fills) — selected
+ *          via the View toggle, useful on small windows or when the
+ *          graph is in the way
  *
  * Hotkeys:
  *   - ⌘N / Ctrl+N: new worktree
  *   - ⌘O / Ctrl+O: open repo
+ *   - ⌘1..⌘9 / Ctrl+1..Ctrl+9: switch to Nth worktree in the list
  *   - ⌘⇧, : hooks & worktree config (⌘, is reserved for system prefs)
  *   - Esc: close any open dialog / menu
  */
@@ -20,6 +24,7 @@ import { useGraphStore } from "@/stores/graph";
 import { useHooksStore } from "@/stores/hooks";
 import { useTerminalStore } from "@/stores/terminal";
 import { useMergeStore } from "@/stores/merge";
+import { usePrefsStore } from "@/stores/prefs";
 import { WorktreeList } from "@/components/worktree/WorktreeList";
 import { CreateWorktreeDialog } from "@/components/worktree/CreateWorktreeDialog";
 import { RemoveWorktreeDialog } from "@/components/worktree/RemoveWorktreeDialog";
@@ -40,8 +45,11 @@ import {
   Plus,
   X,
   Settings as SettingsIcon,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 import type { Worktree } from "@/lib/types";
+import { sortWorktrees } from "@/lib/worktree";
 
 const LEFT_PANE_MIN = 220;
 const LEFT_PANE_MAX = 480;
@@ -66,12 +74,15 @@ export default function App() {
   } = useRepoStore();
   const graphFetch = useGraphStore((s) => s.fetch);
   const graphClear = useGraphStore((s) => s.clear);
+  const graphSetActive = useGraphStore((s) => s.setActive);
   const hooksFetch = useHooksStore((s) => s.fetch);
   const hooksClear = useHooksStore((s) => s.clear);
   const terminalClear = useTerminalStore((s) => s.clear);
   const mergeOpen = useMergeStore((s) => s.open);
   const mergeClose = useMergeStore((s) => s.close);
   const mergePhase = useMergeStore((s) => s.phase);
+  const hideGraphPanel = usePrefsStore((s) => s.hideGraphPanel);
+  const toggleHideGraphPanel = usePrefsStore((s) => s.toggleHideGraphPanel);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
@@ -105,6 +116,11 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
+      // Don't steal the user's shortcuts while they're typing.
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
       if (mod && e.key === "n" && repo) {
         e.preventDefault();
         setCreateOpen(true);
@@ -112,6 +128,24 @@ export default function App() {
       if (mod && e.key === "o") {
         e.preventDefault();
         pickAndOpen();
+      }
+      // ⌘/Ctrl + 1..9 → switch to Nth worktree in the list (uses
+      // the same sort as WorktreeList so the row labels match).
+      // We require e.code (layout-independent) and reject any
+      // non-Cmd/Ctrl modifier so we don't fight ⌘⇧1 etc.
+      if (
+        mod &&
+        !e.shiftKey &&
+        !e.altKey &&
+        /^[1-9]$/.test(e.code.replace("Digit", ""))
+      ) {
+        const idx = Number(e.code.replace("Digit", "")) - 1;
+        const list = useRepoStore.getState().worktrees?.items ?? [];
+        const target2 = sortWorktrees(list)[idx];
+        if (target2?.path) {
+          e.preventDefault();
+          void graphSetActive(target2.path);
+        }
       }
       if (mod && e.shiftKey && e.key === ",") {
         e.preventDefault();
@@ -130,7 +164,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [repo, pickAndOpen]);
+  }, [repo, pickAndOpen, graphSetActive]);
 
   return (
     <div className="flex h-full flex-col">
@@ -138,6 +172,8 @@ export default function App() {
         repo={repo}
         version={version}
         lastFetched={lastFetched}
+        viewHidden={hideGraphPanel}
+        onToggleView={toggleHideGraphPanel}
         onOpen={pickAndOpen}
         onCreate={() => setCreateOpen(true)}
         onRefresh={() => {
@@ -149,13 +185,13 @@ export default function App() {
       />
 
       {error && (
-        <div className="flex items-start justify-between gap-2 border-b border-danger/30 bg-danger/10 px-4 py-2 text-sm text-danger">
+        <div className="flex items-start justify-between gap-2 border-b border-white/[0.06] bg-danger/10 px-4 py-2 text-[13px] text-danger shadow-[0_2px_8px_rgba(239,83,80,0.08)]">
           <span className="flex items-center gap-2">
-            <AlertTriangle size={14} />
+            <AlertTriangle size={14} strokeWidth={1.5} />
             {error}
           </span>
-          <button onClick={clearError} className="rounded p-0.5 hover:bg-danger/20">
-            <X size={14} />
+          <button onClick={clearError} className="rounded p-0.5 hover:bg-white/[0.04] transition-colors duration-150">
+            <X size={14} strokeWidth={1.5} />
           </button>
         </div>
       )}
@@ -166,7 +202,8 @@ export default function App() {
         {repo ? (
           <>
             <div className="flex flex-1 overflow-hidden">
-              {/* Left pane: worktree list */}
+              {/* Left pane: worktree list — always visible, doubles
+                  as a fixed-width sidebar in both layouts. */}
               <ResizablePane
                 width={leftWidth}
                 min={LEFT_PANE_MIN}
@@ -178,7 +215,7 @@ export default function App() {
                   onRemove={(wt) => setRemoveTarget(wt)}
                   onSelect={(wt) => {
                     // Detached or path-less worktrees can't be graphed.
-                    if (wt.path) graphFetch(wt.path);
+                    if (wt.path) void graphSetActive(wt.path);
                   }}
                   onMerge={(wt) => {
                     if (wt.is_main) return;
@@ -193,25 +230,35 @@ export default function App() {
                 />
               </ResizablePane>
 
-              {/* Center pane: commit graph */}
-              <div className="flex-1 overflow-hidden">
-                <CommitGraph />
-              </div>
+              {hideGraphPanel ? (
+                // Graph hidden: terminal takes the rest of the row
+                // (most of the view) and we drop the bottom strip.
+                <TerminalStrip fillsAvailable />
+              ) : (
+                <>
+                  {/* Center pane: commit graph */}
+                  <div className="flex-1 overflow-hidden bg-bg">
+                    <CommitGraph />
+                  </div>
 
-              {/* Right pane: commit details */}
-              <ResizablePane
-                width={rightWidth}
-                min={RIGHT_PANE_MIN}
-                max={RIGHT_PANE_MAX}
-                onResize={setRightWidth}
-                side="left"
-              >
-                <CommitPanel />
-              </ResizablePane>
+                  {/* Right pane: commit details */}
+                  <ResizablePane
+                    width={rightWidth}
+                    min={RIGHT_PANE_MIN}
+                    max={RIGHT_PANE_MAX}
+                    onResize={setRightWidth}
+                    side="left"
+                  >
+                    <CommitPanel />
+                  </ResizablePane>
+                </>
+              )}
             </div>
 
-            {/* Bottom strip: per-worktree terminals */}
-            <TerminalStrip />
+            {/* Bottom strip: per-worktree terminals — only shown
+                alongside the graph. When the graph is hidden, the
+                terminal moves up into the main row above. */}
+            {!hideGraphPanel && <TerminalStrip />}
           </>
         ) : (
           <Home
@@ -279,13 +326,13 @@ function ResizablePane({
   };
   return (
     <div
-      className="relative h-full overflow-auto border-bg-subtle bg-bg-panel"
+      className="relative h-full overflow-auto border-white/[0.06] bg-bg-panel shadow-[0_4px_24px_rgba(0,0,0,0.15)]"
       style={{
         width,
         flexShrink: 0,
         borderRightWidth: side === "right" ? 1 : 0,
         borderLeftWidth: side === "left" ? 1 : 0,
-        borderRight: side === "right" ? undefined : "none",
+        borderStyle: "solid",
       }}
     >
       {children}
@@ -303,8 +350,8 @@ function ResizablePane({
         title="Drag to resize"
       >
         <div
-          className="h-full w-px bg-bg-subtle transition-colors group-hover:bg-accent"
-          style={{ marginLeft: "auto", marginRight: "auto" }}
+          className="h-full w-px transition-all duration-200 ease-standard group-hover:bg-accent/50 group-hover:shadow-[0_0_6px_rgba(94,106,210,0.25)]"
+          style={{ marginLeft: "auto", marginRight: "auto", backgroundColor: "rgba(255,255,255,0.06)" }}
         />
       </div>
     </div>
@@ -315,6 +362,8 @@ function Header({
   repo,
   version,
   lastFetched,
+  viewHidden,
+  onToggleView,
   onOpen,
   onCreate,
   onRefresh,
@@ -324,6 +373,8 @@ function Header({
   repo: ReturnType<typeof useRepoStore.getState>["repo"];
   version: ReturnType<typeof useRepoStore.getState>["version"];
   lastFetched: number | null;
+  viewHidden: boolean;
+  onToggleView: () => void;
   onOpen: () => void;
   onCreate: () => void;
   onRefresh: () => void;
@@ -331,16 +382,19 @@ function Header({
   onSettings: () => void;
 }) {
   return (
-    <header className="flex items-center justify-between gap-4 border-b border-bg-subtle bg-bg-panel px-4 py-2">
+    <header className="relative flex items-center justify-between gap-4 bg-bg px-4 py-2.5 z-10">
+      {/* Subtle gradient bottom border */}
+      <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
-          <GitFork size={18} className="text-accent" />
-          <span className="text-lg font-semibold">gitsu</span>
+          <GitFork size={18} className="text-accent" strokeWidth={1.5} />
+          <span className="text-[15px] font-semibold tracking-tight text-fg">gitsu</span>
         </div>
         {repo ? (
           <>
-            <span className="text-fg-subtle">/</span>
-            <span className="truncate font-mono text-sm" title={repo.path}>
+            <span className="text-fg-muted/40">/</span>
+            <span className="truncate font-mono text-[13px] text-fg" title={repo.path}>
               {repo.name}
             </span>
             {version && (
@@ -350,35 +404,51 @@ function Header({
             )}
           </>
         ) : (
-          <span className="text-fg-muted">worktree-first git client</span>
+          <span className="text-fg-muted text-[13px]">worktree-first git client</span>
         )}
       </div>
 
       <div className="flex items-center gap-2">
         {lastFetched && (
-          <span className="text-xs text-fg-subtle" title={new Date(lastFetched).toLocaleString()}>
+          <span className="text-[11px] text-fg-muted tabular-nums" title={new Date(lastFetched).toLocaleString()}>
             updated {secondsAgo(lastFetched)}
           </span>
         )}
         {repo && (
           <>
+            <Button
+              onClick={onToggleView}
+              title={
+                viewHidden
+                  ? "Show graph & file panel"
+                  : "Hide graph & file panel (worktree list only)"
+              }
+              aria-pressed={viewHidden}
+            >
+              {viewHidden ? (
+                <PanelRightOpen size={14} strokeWidth={1.5} />
+              ) : (
+                <PanelRightClose size={14} strokeWidth={1.5} />
+              )}
+              {viewHidden ? "Show graph" : "Hide graph"}
+            </Button>
             <Button onClick={onSettings} title="Settings (⌘,)">
-              <SettingsIcon size={14} /> Settings
+              <SettingsIcon size={14} strokeWidth={1.5} /> Settings
             </Button>
             <Button onClick={onHooks} title="Hooks & worktree config (⌘⇧,)">
-              <GitBranch size={14} /> Hooks
+              <GitBranch size={14} strokeWidth={1.5} /> Hooks
             </Button>
             <Button onClick={onRefresh} title="Refresh (R)">
               Refresh
             </Button>
             <Button variant="primary" onClick={onCreate} title="New worktree (⌘N / Ctrl+N)">
-              <Plus size={14} /> New worktree
+              <Plus size={14} strokeWidth={1.5} /> New worktree
             </Button>
           </>
         )}
         {!repo && (
           <Button variant="primary" onClick={onOpen}>
-            <FolderOpen size={14} /> Open repo
+            <FolderOpen size={14} strokeWidth={1.5} /> Open repo
           </Button>
         )}
       </div>
@@ -400,48 +470,48 @@ function Home({
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 p-10">
       <section className="text-center">
-        <h1 className="mb-2 text-3xl font-semibold">
+        <h1 className="mb-3 text-[28px] font-semibold tracking-tight text-fg">
           Worktrees, <span className="text-accent">first</span>.
         </h1>
-        <p className="mx-auto max-w-md text-fg-muted">
+        <p className="mx-auto max-w-md text-fg-muted leading-relaxed text-[14px]">
           A Git desktop client where every branch gets its own folder, its own terminal, its own state — all in one
           window, powered by{" "}
-          <a className="text-accent hover:underline" href="https://worktrunk.dev" target="_blank" rel="noreferrer">
+          <a className="text-accent hover:underline underline-offset-2" href="https://worktrunk.dev" target="_blank" rel="noreferrer">
             worktrunk
           </a>
           .
         </p>
-        <div className="mt-6 flex items-center justify-center gap-2">
+        <div className="mt-8 flex items-center justify-center gap-2">
           <Button variant="primary" onClick={onOpen}>
-            <FolderOpen size={14} /> Open a repository
+            <FolderOpen size={14} strokeWidth={1.5} /> Open a repository
           </Button>
         </div>
       </section>
 
       {recents.length > 0 && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-fg-muted">Recent</h2>
-          <ul className="flex flex-col gap-1.5">
+          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-fg-muted">Recent</h2>
+          <ul className="flex flex-col gap-2">
             {recents.map((r) => (
               <li
                 key={r.path}
-                className="group flex items-center gap-3 rounded-md border border-transparent bg-bg-panel p-3 hover:border-bg-subtle"
+                className="group flex items-center gap-3 rounded-lg border border-white/[0.06] bg-bg-panel px-4 py-3 transition-all duration-200 ease-standard hover:border-white/[0.1] hover:bg-[#2F3135] hover:shadow-[0_2px_12px_rgba(0,0,0,0.2)] hover:-translate-y-px"
               >
-                <GitBranch size={16} className="text-accent" />
+                <GitBranch size={16} className="text-accent shrink-0" strokeWidth={1.5} />
                 <button
-                  className="flex-1 truncate text-left text-sm font-medium hover:text-accent"
+                  className="flex-1 truncate text-left text-[13px] font-medium text-fg hover:text-accent transition-colors duration-150"
                   onClick={() => onPickRecent(r.path)}
                   title={r.path}
                 >
                   {r.name}
-                  <span className="ml-2 truncate font-mono text-xs font-normal text-fg-subtle">{r.path}</span>
+                  <span className="ml-2 truncate font-mono text-[12px] font-normal text-fg-muted">{r.path}</span>
                 </button>
                 <button
-                  className="rounded p-1 text-fg-subtle opacity-0 hover:bg-danger/15 hover:text-danger group-hover:opacity-100"
+                  className="rounded p-1 text-fg-muted opacity-0 hover:bg-danger/10 hover:text-danger group-hover:opacity-100 transition-all duration-150"
                   onClick={() => onForget(r.path)}
                   title="Forget"
                 >
-                  <X size={14} />
+                  <X size={14} strokeWidth={1.5} />
                 </button>
               </li>
             ))}
