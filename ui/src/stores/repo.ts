@@ -23,6 +23,8 @@ interface RepoState {
 
   // Actions
   setRepo: (r: RecentRepo | null) => void;
+  /** Close the active repo and return to the projects (recents) view. */
+  closeRepo: () => void;
   refresh: () => Promise<void>;
   refreshRecents: () => Promise<void>;
   openByPath: (path: string) => Promise<void>;
@@ -43,6 +45,15 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   lastFetched: null,
 
   setRepo: (r) => set({ repo: r, worktrees: null, error: null }),
+
+  closeRepo: () => {
+    // The App-level effect that watches `repo` will stop the worktree
+    // poll loop and clear graph/hooks/terminal stores on its own. We
+    // just need to drop the active repo + cached worktree list. We
+    // also kick a recents refresh so the projects view is current.
+    set({ repo: null, worktrees: null, error: null });
+    void get().refreshRecents();
+  },
 
   refreshRecents: async () => {
     try {

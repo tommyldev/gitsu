@@ -221,7 +221,7 @@ function PreviewView({
 }
 
 function ConflictResult({ conflicts }: { conflicts: string[] }) {
-  const open = useTerminalStore((s) => s.open);
+  const ensurePane = useTerminalStore((s) => s.ensurePane);
   const context = useMergeStore((s) => s.context);
   const enterResolving = useMergeStore((s) => s.enterResolving);
 
@@ -249,7 +249,7 @@ function ConflictResult({ conflicts }: { conflicts: string[] }) {
       </ul>
       <div className="flex justify-end gap-2">
         <button
-          onClick={() => context && open(context.worktree, 80, 24)}
+          onClick={() => context && void ensurePane(context.worktree)}
           className="flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-bg px-3 py-1.5 text-[11px] text-fg-muted hover:border-accent/50 hover:text-fg transition-colors duration-150"
         >
           <TerminalIcon size={12} strokeWidth={1.5} /> Open terminal
@@ -358,7 +358,7 @@ function Footer({ onMerge }: { onMerge: () => void }) {
   const preview = useMergeStore((s) => s.preview);
   const result = useMergeStore((s) => s.result);
   const close = useMergeStore((s) => s.close);
-  const open = useTerminalStore((s) => s.open);
+  const ensurePane = useTerminalStore((s) => s.ensurePane);
   const context = useMergeStore((s) => s.context);
 
   const canMerge =
@@ -372,7 +372,7 @@ function Footer({ onMerge }: { onMerge: () => void }) {
       <div>
         {context && phase === "ready" && (
           <button
-            onClick={() => open(context.worktree, 80, 24)}
+            onClick={() => void ensurePane(context.worktree)}
             className="flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-bg px-2 py-1 text-[11px] text-fg-muted hover:border-accent/50 hover:text-fg transition-colors duration-150"
           >
             <TerminalIcon size={11} strokeWidth={1.5} /> Open terminal
@@ -380,7 +380,7 @@ function Footer({ onMerge }: { onMerge: () => void }) {
         )}
         {result && result.conflicts.length > 0 && (
           <button
-            onClick={() => context && open(context.worktree, 80, 24)}
+          onClick={() => context && void ensurePane(context.worktree)}
             className="flex items-center gap-1.5 rounded-md border border-white/[0.08] bg-bg px-2 py-1 text-[11px] text-fg-muted hover:border-accent/50 hover:text-fg transition-colors duration-150"
           >
             <TerminalIcon size={11} strokeWidth={1.5} /> Open terminal

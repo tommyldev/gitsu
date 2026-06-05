@@ -13,6 +13,8 @@
  * Hotkeys:
  *   - ⌘N / Ctrl+N: new worktree
  *   - ⌘O / Ctrl+O: open repo
+ *   - ⌘K / Ctrl+K: project switcher palette (rapid project switch
+ *     + "← All projects" entry to return to the projects view)
  *   - ⌘1..⌘9 / Ctrl+1..Ctrl+9: switch to Nth worktree in the list
  *   - ⌘⇧, : hooks & worktree config (⌘, is reserved for system prefs)
  *   - Esc: close any open dialog / menu
@@ -47,6 +49,7 @@ import {
   Settings as SettingsIcon,
   PanelRightClose,
   PanelRightOpen,
+  LayoutGrid,
 } from "lucide-react";
 import type { Worktree } from "@/lib/types";
 import { sortWorktrees } from "@/lib/worktree";
@@ -88,6 +91,7 @@ export default function App() {
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
   const [hooksManagerOpen, setHooksManagerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [leftWidth, setLeftWidth] = useState(LEFT_DEFAULT);
   const [rightWidth, setRightWidth] = useState(RIGHT_DEFAULT);
 
@@ -129,6 +133,15 @@ export default function App() {
         e.preventDefault();
         pickAndOpen();
       }
+      // ⌘/Ctrl + K → toggle the project switcher palette. Toggling
+      // (not just opening) means the user can dismiss it with the
+      // same gesture, and it's symmetric with the system's own
+      // ⌘K behavior in most apps.
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((p) => !p);
+        return;
+      }
       // ⌘/Ctrl + 1..9 → switch to Nth worktree in the list (uses
       // the same sort as WorktreeList so the row labels match).
       // We require e.code (layout-independent) and reject any
@@ -160,6 +173,7 @@ export default function App() {
         setRemoveTarget(null);
         setHooksManagerOpen(false);
         setSettingsOpen(false);
+        setPaletteOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -175,6 +189,7 @@ export default function App() {
         viewHidden={hideGraphPanel}
         onToggleView={toggleHideGraphPanel}
         onOpen={pickAndOpen}
+        onPalette={() => setPaletteOpen(true)}
         onCreate={() => setCreateOpen(true)}
         onRefresh={() => {
           refresh();
@@ -254,11 +269,6 @@ export default function App() {
                 </>
               )}
             </div>
-
-            {/* Bottom strip: per-worktree terminals — only shown
-                alongside the graph. When the graph is hidden, the
-                terminal moves up into the main row above. */}
-            {!hideGraphPanel && <TerminalStrip />}
           </>
         ) : (
           <Home
@@ -281,6 +291,7 @@ export default function App() {
         <HooksManager onClose={() => setHooksManagerOpen(false)} />
       )}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {paletteOpen && <ProjectSwitcher onClose={() => setPaletteOpen(false)} />}
       {mergePhase !== "idle" && mergePhase !== "resolving" && <MergeDialog />}
       {mergePhase === "resolving" && <ConflictEditor />}
 

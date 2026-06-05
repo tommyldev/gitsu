@@ -1,12 +1,24 @@
 /**
- * Terminal store — manages the per-worktree PTY sessions.
+ * Terminal store — manages per-worktree PTY sessions laid out as a
+ * tree of split panes.
  *
- * On first open of a worktree, the store spawns a PTY. Output arrives
- * via `pty:data:<id>` Tauri events. The xterm.js frontend renders it.
+ * Layout model: each worktree has a `Layout` tree. Leaves are panes
+ * (one PTY each); internal nodes are splits. Splits can be nested
+ * (e.g. a horizontal split inside the right half of a vertical
+ * split). Closing a pane collapses its parent split; the sibling
+ * takes the parent's place.
  *
- * Sessions are persisted across worktree navigation (the PTY keeps
- * running in the background). Closing a tab kills the PTY. The
- * backend cleans up on `wt remove` for the matching worktree.
+ * Lifecycle of a pane:
+ *   1. `splitPane(worktree, paneId, dir)` creates a new sibling pane
+ *      and calls `pty_spawn` for it. The new pane gets focus.
+ *   2. Output arrives via `pty:data:<id>` Tauri events; the xterm
+ *      instance writes to the screen.
+ *   3. `closePane(worktree, paneId)` kills the PTY and removes the
+ *      pane. If it was the only pane, the worktree's layout is gone.
+ *
+ * Layouts are in-memory only (reset on app restart). Persisting the
+ * tree shape can come later — the SQLite store can hold a JSON blob
+ * per worktree if we want to restore on reopen.
  */
 
 import { create } from "zustand";
@@ -24,168 +36,338 @@ export interface PtySession {
   unlisten?: () => void;
 }
 
-interface TerminalState {
-  sessions: Map<string, PtySession>;
-  /** worktree → session id (one per worktree) */
-  byWorktree: Map<string, number>;
-  loading: boolean;
+// ── Layout tree ────────────────────────────────────────────────
 
-  /** Open (or focus) the terminal for a worktree. */
-  open: (worktree: string, cols: number, rows: number) => Promise<number>;
-  /** Close (kill) the terminal for a worktree. */
-  close: (worktree: string) => Promise<void>;
-  /** Send input bytes (frontend keystrokes). */
+export type SplitDir = "h" | "v";
+/** `h` = horizontal divider → panes stack vertically; `v` = vertical divider → panes side by side. */
+
+export type Layout =
+  | { kind: "split"; id: string; dir: SplitDir; ratio: number; a: Layout; b: Layout }
+  | { kind: "pane"; id: string; sessionId: number | null };
+
+let nextTempSessionId = 1_000_000; // unlikely to collide with the backend's allocator
+let nextPaneId = 1;
+let nextSplitId = 1;
+const newPaneId = () => `pane-${nextPaneId++}`;
+const newSplitId = () => `split-${nextSplitId++}`;
+const newTempSessionId = () => nextTempSessionId++;
+
+/** Walk the tree to find a pane. Returns `{ layout, path }` where
+ * `path` is an array of `0`/`1` indices from the root. */
+function findPane(
+  layout: Layout,
+  paneId: string,
+  path: number[] = [],
+): { layout: Layout; path: number[] } | null {
+  if (layout.kind === "pane") {
+    return layout.id === paneId ? { layout, path } : null;
+  }
+  const a = findPane(layout.a, paneId, [...path, 0]);
+  if (a) return a;
+  return findPane(layout.b, paneId, [...path, 1]);
+}
+
+function updateAt(
+  layout: Layout,
+  path: number[],
+  updater: (l: Layout) => Layout,
+): Layout {
+  if (path.length === 0) return updater(layout);
+  if (layout.kind !== "split") return layout;
+  const [head, ...rest] = path;
+  if (head === 0) return { ...layout, a: updateAt(layout.a, rest, updater) };
+  return { ...layout, b: updateAt(layout.b, rest, updater) };
+}
+
+/** Remove the pane with the given id. If removing the leaf leaves
+ * a single-child split, collapse the parent. Returns the new tree,
+ * or `null` if the root was the removed pane. */
+function removePane(layout: Layout, paneId: string): Layout | null {
+  if (layout.kind === "pane") {
+    return layout.id === paneId ? null : layout;
+  }
+  const a = removePane(layout.a, paneId);
+  if (a === null) return layout.b;
+  const b = removePane(layout.b, paneId);
+  if (b === null) return layout.a;
+  return { ...layout, a, b };
+}
+
+// ── Store ──────────────────────────────────────────────────────
+
+interface TerminalState {
+  /** All live PTY sessions, keyed by backend id. */
+  sessions: Map<number, PtySession>;
+  /** Per-worktree layout tree (the split + pane structure). */
+  layouts: Map<string, Layout>;
+  /** Currently-focused pane per worktree, for keystroke routing. */
+  focusedPane: Map<string, string>;
+
+  /** Ensure at least one pane exists in the worktree. If one
+   * already does, this is a no-op and returns the existing session
+   * id. Used as the entry point for "open terminal" affordances
+   * (the strip's empty state, the merge dialog, etc.). */
+  ensurePane: (worktree: string) => Promise<number>;
+  /** Split the given pane in the given direction. Spawns a PTY for the new sibling. */
+  splitPane: (worktree: string, paneId: string, dir: SplitDir) => Promise<number>;
+  /** Close (kill + remove) a pane. Collapses the parent split. */
+  closePane: (worktree: string, paneId: string) => Promise<void>;
+  /** Update a split's ratio (clamped to 0.15..0.85). */
+  setRatio: (worktree: string, splitId: string, ratio: number) => void;
+  /** Mark a pane as focused (for visual indicator + future input routing). */
+  setFocus: (worktree: string, paneId: string) => void;
+
+  /** Send input bytes to a session. */
   send: (id: number, data: Uint8Array) => Promise<void>;
-  /** Resize the PTY (xterm.js calls this on container resize). */
+  /** Resize a session's PTY. */
   resize: (id: number, cols: number, rows: number) => Promise<void>;
 
   /** Tear down everything (e.g. on repo close). */
   clear: () => Promise<void>;
 }
 
-let nextTempId = 1_000_000; // unlikely to collide with the backend's allocator
-
-export const useTerminalStore = create<TerminalState>((set, get) => ({
-  sessions: new Map(),
-  byWorktree: new Map(),
-  loading: false,
-
-  open: async (worktree, cols, rows) => {
-    const existing = get().byWorktree.get(worktree);
-    if (existing !== undefined) {
-      return existing;
-    }
-    // Optimistic placeholder
-    const placeholderId = nextTempId++;
+export const useTerminalStore = create<TerminalState>((set, get) => {
+  // Spawn a PTY and wire up its event listeners. Returns the real
+  // backend id once the shell is running (or throws on failure).
+  const spawnPty = async (worktree: string): Promise<number> => {
+    const tempId = newTempSessionId();
+    // Optimistic placeholder so the pane can render a "spawning"
+    // state immediately. We replace this with the real id once
+    // `pty_spawn` resolves.
     set((s) => {
       const sessions = new Map(s.sessions);
-      sessions.set(worktree, {
-        id: placeholderId,
-        worktree,
-        status: "spawning",
-        error: null,
-      });
-      const byWorktree = new Map(s.byWorktree);
-      byWorktree.set(worktree, placeholderId);
-      return { sessions, byWorktree };
+      sessions.set(tempId, { id: tempId, worktree, status: "spawning", error: null });
+      return { sessions };
     });
-
     try {
-      const id = await invoke<number>("pty_spawn", { worktree, cols, rows });
-      // Subscribe to events for this PTY. The callbacks update the
-      // session status in place; we don't need to read the data here
-      // (the Terminal component subscribes to its own copy of the
-      // event when it mounts).
-      let unlistenData: (() => void) | undefined;
+      const id = await invoke<number>("pty_spawn", { worktree, cols: 80, rows: 24 });
+      // Subscribe to exit events so we can mark the session as exited.
+      // (Data events are subscribed by the per-mount TerminalSessionView.)
       let unlistenExit: (() => void) | undefined;
-      const teardown = () => {
-        unlistenData?.();
-        unlistenExit?.();
-      };
-      unlistenData = await listen<{ id: number; data: number[] }>(
-        `pty:data:${id}`,
-        () => {
-          // No-op: the per-mount Terminal subscribes for its own
-          // session id. We keep this listener registered as a no-op
-          // so the event isn't "lost" if no component is mounted
-          // yet — without it, xterm would miss early output.
-        },
-      );
+      const teardown = () => unlistenExit?.();
       unlistenExit = await listen<{ id: number; code: number | null }>(
         `pty:exit:${id}`,
         () => {
           set((s) => {
             const sessions = new Map(s.sessions);
-            const cur = sessions.get(worktree);
-            if (cur && cur.id === id) {
-              sessions.set(worktree, { ...cur, status: "exited" });
-            }
+            const cur = sessions.get(id);
+            if (cur) sessions.set(id, { ...cur, status: "exited" });
             return { sessions };
           });
           teardown();
         },
       );
-      // Replace placeholder with the real session.
+      // Replace the placeholder with the real session.
       set((s) => {
         const sessions = new Map(s.sessions);
-        sessions.set(worktree, {
-          id,
-          worktree,
-          status: "running",
-          error: null,
-          unlisten: teardown,
-        });
-        const byWorktree = new Map(s.byWorktree);
-        byWorktree.set(worktree, id);
-        return { sessions, byWorktree };
+        sessions.delete(tempId);
+        sessions.set(id, { id, worktree, status: "running", error: null, unlisten: teardown });
+        return { sessions };
       });
       return id;
     } catch (e) {
       set((s) => {
         const sessions = new Map(s.sessions);
-        const cur = sessions.get(worktree);
-        if (cur) {
-          sessions.set(worktree, {
-            ...cur,
-            status: "error",
-            error: parseError(e),
-          });
-        }
+        const cur = sessions.get(tempId);
+        if (cur) sessions.set(tempId, { ...cur, status: "error", error: parseError(e) });
         return { sessions };
       });
       throw e;
     }
-  },
+  };
 
-  close: async (worktree) => {
-    const session = get().sessions.get(worktree);
-    if (!session) return;
-    session.unlisten?.();
-    try {
-      await invoke("pty_kill", { id: session.id });
-    } catch (e) {
-      if (!(e instanceof WtRpcError && e.kind === "invalid_argument")) {
-        console.warn("pty_kill failed", e);
+  return {
+    sessions: new Map(),
+    layouts: new Map(),
+    focusedPane: new Map(),
+
+    ensurePane: async (worktree: string) => {
+      // If the worktree already has a layout, return the first
+      // session id we find (so callers can keep using the return
+      // value uniformly). The pane count and focus stay as-is.
+      const existing = get().layouts.get(worktree);
+      if (existing) {
+        const id = firstSessionId(existing);
+        if (id != null) return id;
       }
-    }
-    set((s) => {
-      const sessions = new Map(s.sessions);
-      sessions.delete(worktree);
-      const byWorktree = new Map(s.byWorktree);
-      byWorktree.delete(worktree);
-      return { sessions, byWorktree };
-    });
-  },
+      const id = await spawnPty(worktree);
+      const paneId = newPaneId();
+      set((s) => {
+        const layouts = new Map(s.layouts);
+        layouts.set(worktree, { kind: "pane", id: paneId, sessionId: id });
+        const focused = new Map(s.focusedPane);
+        focused.set(worktree, paneId);
+        return { layouts, focusedPane: focused };
+      });
+      return id;
+    },
 
-  send: async (id, data) => {
-    try {
-      await invoke("pty_send", { id, data: Array.from(data) });
-    } catch (e) {
-      console.warn("pty_send failed", e);
-    }
-  },
-
-  resize: async (id, cols, rows) => {
-    try {
-      await invoke("pty_resize", { id, cols, rows });
-    } catch (e) {
-      console.debug("pty_resize", e);
-    }
-  },
-
-  clear: async () => {
-    const { sessions } = get();
-    for (const session of sessions.values()) {
-      session.unlisten?.();
+    splitPane: async (worktree, paneId, dir) => {
+      const layout = get().layouts.get(worktree);
+      if (!layout) {
+        // No layout yet — fall back to ensurePane.
+        return get().ensurePane(worktree);
+      }
+      const found = findPane(layout, paneId);
+      if (!found) {
+        // Pane id is stale (the tree was rebuilt); spawn fresh.
+        return get().ensurePane(worktree);
+      }
+      const newPane = { kind: "pane" as const, id: newPaneId(), sessionId: null };
+      const split: Layout = {
+        kind: "split",
+        id: newSplitId(),
+        dir,
+        ratio: 0.5,
+        a: found.layout, // existing pane keeps its session
+        b: newPane,
+      };
+      set((s) => {
+        const layouts = new Map(s.layouts);
+        layouts.set(worktree, updateAt(layout, found.path, () => split));
+        const focused = new Map(s.focusedPane);
+        focused.set(worktree, newPane.id);
+        return { layouts, focusedPane: focused };
+      });
+      // Spawn the new pane's PTY. If the spawn fails, undo the split.
       try {
-        await invoke("pty_kill", { id: session.id });
-      } catch {
-        // ignore
+        const id = await spawnPty(worktree);
+        set((s) => {
+          const layouts = new Map(s.layouts);
+          const cur = layouts.get(worktree);
+          if (!cur) return {};
+          // Find the newPane in the new tree and set its sessionId.
+          const found2 = findPane(cur, newPane.id);
+          if (!found2) return {};
+          layouts.set(worktree, updateAt(cur, found2.path, () => ({ ...newPane, sessionId: id })));
+          return { layouts };
+        });
+        return id;
+      } catch (e) {
+        // Roll back: remove the new pane (which collapses the split back).
+        set((s) => {
+          const layouts = new Map(s.layouts);
+          const cur = layouts.get(worktree);
+          if (cur) {
+            const rolled = removePane(cur, newPane.id);
+            if (rolled === null) layouts.delete(worktree);
+            else layouts.set(worktree, rolled);
+          }
+          return { layouts };
+        });
+        throw e;
       }
-    }
-    set({ sessions: new Map(), byWorktree: new Map() });
-  },
-}));
+    },
+
+    closePane: async (worktree, paneId) => {
+      const layout = get().layouts.get(worktree);
+      if (!layout) return;
+      const found = findPane(layout, paneId);
+      if (!found) return;
+      const sessionId = found.layout.kind === "pane" ? found.layout.sessionId : null;
+      const newLayout = removePane(layout, paneId);
+      set((s) => {
+        const layouts = new Map(s.layouts);
+        const sessions = new Map(s.sessions);
+        const focused = new Map(s.focusedPane);
+        if (newLayout === null) {
+          layouts.delete(worktree);
+          focused.delete(worktree);
+        } else {
+          layouts.set(worktree, newLayout);
+          // If the focused pane was removed, focus the next leaf in
+          // a left-to-right pre-order traversal.
+          if (focused.get(worktree) === paneId) {
+            const next = firstPaneId(newLayout);
+            if (next) focused.set(worktree, next);
+            else focused.delete(worktree);
+          }
+        }
+        if (sessionId != null) {
+          const sess = sessions.get(sessionId);
+          if (sess) {
+            sess.unlisten?.();
+            sessions.delete(sessionId);
+            // Best-effort kill; swallow errors so close stays snappy.
+            void invoke("pty_kill", { id: sessionId }).catch((e) => {
+              if (!(e instanceof WtRpcError && e.kind === "invalid_argument")) {
+                console.warn("pty_kill", e);
+              }
+            });
+          }
+        }
+        return { layouts, sessions, focusedPane: focused };
+      });
+    },
+
+    setRatio: (worktree, splitId, ratio) => {
+      const layout = get().layouts.get(worktree);
+      if (!layout) return;
+      // Find the split by id; clamp ratio so panes never get squashed.
+      const clamped = Math.max(0.15, Math.min(0.85, ratio));
+      const newLayout = mapLayout(layout, (l) =>
+        l.kind === "split" && l.id === splitId ? { ...l, ratio: clamped } : l,
+      );
+      set((s) => {
+        const layouts = new Map(s.layouts);
+        layouts.set(worktree, newLayout);
+        return { layouts };
+      });
+    },
+
+    setFocus: (worktree, paneId) => {
+      set((s) => {
+        const focused = new Map(s.focusedPane);
+        focused.set(worktree, paneId);
+        return { focusedPane: focused };
+      });
+    },
+
+    send: async (id, data) => {
+      try {
+        await invoke("pty_send", { id, data: Array.from(data) });
+      } catch (e) {
+        console.warn("pty_send failed", e);
+      }
+    },
+
+    resize: async (id, cols, rows) => {
+      try {
+        await invoke("pty_resize", { id, cols, rows });
+      } catch (e) {
+        console.debug("pty_resize", e);
+      }
+    },
+
+    clear: async () => {
+      const { sessions } = get();
+      for (const session of sessions.values()) {
+        session.unlisten?.();
+        try {
+          await invoke("pty_kill", { id: session.id });
+        } catch {
+          // ignore
+        }
+      }
+      set({ sessions: new Map(), layouts: new Map(), focusedPane: new Map() });
+    },
+  };
+});
+
+function mapLayout(layout: Layout, fn: (l: Layout) => Layout): Layout {
+  if (layout.kind === "pane") return fn(layout);
+  return fn({ ...layout, a: mapLayout(layout.a, fn), b: mapLayout(layout.b, fn) });
+}
+
+function firstPaneId(layout: Layout): string | null {
+  if (layout.kind === "pane") return layout.id;
+  return firstPaneId(layout.a) ?? firstPaneId(layout.b);
+}
+
+function firstSessionId(layout: Layout): number | null {
+  if (layout.kind === "pane") return layout.sessionId;
+  return firstSessionId(layout.a) ?? firstSessionId(layout.b);
+}
 
 function parseError(e: unknown): string {
   if (e instanceof WtRpcError) return e.message;

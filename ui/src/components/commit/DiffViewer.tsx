@@ -24,6 +24,7 @@ interface Props {
   worktree: string;
   files: FileDiff[];
   loading: boolean;
+  onFileClick?: (file: FileDiff) => void;
 }
 
 const STATUS_ICON: Record<DiffStatus, LucideIcon> = {
@@ -48,7 +49,7 @@ const STATUS_TONE: Record<DiffStatus, string> = {
   ignored: "text-fg-subtle",
 };
 
-export function DiffViewer({ files, loading }: Props) {
+export function DiffViewer({ files, loading, onFileClick }: Props) {
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const toggle = (path: string) => {
     setOpen((prev) => {
@@ -57,6 +58,14 @@ export function DiffViewer({ files, loading }: Props) {
       else next.add(path);
       return next;
     });
+  };
+
+  const handleClick = (file: FileDiff) => {
+    if (onFileClick) {
+      onFileClick(file);
+    } else {
+      toggle(file.new_path ?? file.old_path ?? "(unknown)");
+    }
   };
 
   if (loading) {
@@ -82,7 +91,7 @@ export function DiffViewer({ files, loading }: Props) {
             key={key + ":" + f.status}
             file={f}
             isOpen={open.has(key)}
-            onToggle={() => toggle(key)}
+            onToggle={() => handleClick(f)}
           />
         );
       })}

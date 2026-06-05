@@ -6,11 +6,15 @@
  *   - "commit": shows a commit's metadata + file list + diff
  *   - "workdir": shows the working tree's file list + diff
  *
+ * When the user clicks a file, the panel swaps to a dedicated
+ * "file focus" view that takes over the entire right pane. A back
+ * button returns to the file list.
+ *
  * The toggle lives in the panel header.
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Copy, GitBranch, GitCommit, Tag, User, Calendar, FileCode, ChevronRight, Loader2, Sparkles } from "lucide-react";
+import { Copy, GitBranch, GitCommit, Tag, User, Calendar, FileCode, ChevronRight, Loader2, Sparkles, ArrowLeft } from "lucide-react";
 import clsx from "clsx";
 import { useGraphStore } from "@/stores/graph";
 import { useRepoStore } from "@/stores/repo";
@@ -27,6 +31,7 @@ export function CommitPanel() {
   const [files, setFiles] = useState<FileDiff[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeFile, setActiveFile] = useState<FileDiff | null>(null);
 
   const node = useMemo(
     () => graph?.nodes.find((n) => n.sha === selectedSha),
@@ -47,6 +52,7 @@ export function CommitPanel() {
     setError(null);
     setLoading(true);
     setFiles([]);
+    setActiveFile(null);
     let cancelled = false;
     (async () => {
       try {
@@ -110,38 +116,52 @@ export function CommitPanel() {
       )}
 
       <div className="flex-1 overflow-auto">
-        {mode === "commit" && node ? (
-          <CommitHeader
-            sha={node.sha}
-            shortSha={node.short_sha}
-            summary={node.summary}
-            body={node.body}
-            authorName={node.author_name}
-            authorEmail={node.author_email}
-            authorTime={node.author_time}
-            committerTime={node.committer_time}
-            tree={node.tree}
-            branches={branches}
-            tags={tags}
+        {activeFile ? (
+          <FileFocus
+            file={activeFile}
+            onBack={() => setActiveFile(null)}
           />
-        ) : null}
-
-        {mode === "workdir" && (
-          <div className="border-b border-white/[0.06] px-4 py-2 text-[13px]">
-            <span className="font-medium text-fg">Uncommitted changes</span>
-            <p className="text-[11px] text-fg-muted">
-              Showing staged + unstaged + untracked files in the working tree.
-            </p>
-          </div>
-        )}
-
-        {loading ? (
-          <div className="flex items-center justify-center p-6 text-fg-muted">
-            <Loader2 size={14} className="mr-2 animate-spin" strokeWidth={1.5} />
-            <span className="text-[13px]">Loading…</span>
-          </div>
         ) : (
-          <DiffViewer worktree={repo?.path ?? ""} files={files} loading={false} />
+          <>
+            {mode === "commit" && node ? (
+              <CommitHeader
+                sha={node.sha}
+                shortSha={node.short_sha}
+                summary={node.summary}
+                body={node.body}
+                authorName={node.author_name}
+                authorEmail={node.author_email}
+                authorTime={node.author_time}
+                committerTime={node.committer_time}
+                tree={node.tree}
+                branches={branches}
+                tags={tags}
+              />
+            ) : null}
+
+            {mode === "workdir" && (
+              <div className="border-b border-white/[0.06] px-4 py-2 text-[13px]">
+                <span className="font-medium text-fg">Uncommitted changes</span>
+                <p className="text-[11px] text-fg-muted">
+                  Showing staged + unstaged + untracked files in the working tree.
+                </p>
+              </div>
+            )}
+
+            {loading ? (
+              <div className="flex items-center justify-center p-6 text-fg-muted">
+                <Loader2 size={14} className="mr-2 animate-spin" strokeWidth={1.5} />
+                <span className="text-[13px]">Loading…</span>
+              </div>
+            ) : (
+              <DiffViewer
+                worktree={repo?.path ?? ""}
+                files={files}
+                loading={false}
+                onFileClick={(f) => setActiveFile(f)}
+              />
+            )}
+          </>
         )}
       </div>
     </aside>
@@ -155,6 +175,112 @@ function clsxTab(active: boolean): string {
       ? "bg-white/[0.05] text-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
       : "text-fg-muted hover:bg-white/[0.03] hover:text-fg",
   );
+}
+
+function FileFocus({
+  file,
+  onBack,
+}: {
+  file: FileDiff;
+  onBack: () => void;
+}) {
+  const path = file.new_path ?? file.old_path ?? "(unknown)";
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] bg-bg-subtle/40 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <button
+          onClick={onBack}
+          className="rounded p-1 text-fg-muted transition-colors duration-150 hover:bg-white/[0.04] hover:text-fg"
+          title="Back to file list"
+        >
+          <ArrowLeft size={14} strokeWidth={1.5} />
+        </button>
+        <span className="truncate font-mono text-[12px] text-fg">{path}</span>
+        <span className="ml-auto flex gap-2 font-sans text-[11px]">
+          <span className="text-success">+{file.additions}</span>
+          <span className="text-danger">−{file.deletions}</span>
+        </span>
+      </div>
+      <div className="flex-1 overflow-auto bg-bg">
+        {file.is_binary ? (
+          <div className="flex h-full items-center justify-center text-[13px] text-fg-muted">
+            Binary file — no preview.
+          </div>
+        ) : (
+          <UnifiedDiff patch={file.patch} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UnifiedDiff({ patch }: { patch: string }) {
+  const lines = useMemo(() => parsePatch(patch), [patch]);
+  return (
+    <pre className="overflow-x-auto p-3 font-mono text-[12px] leading-relaxed">
+      <code>
+        {lines.map((line, i) => (
+          <div
+            key={i}
+            className={clsx(
+              "flex",
+              line.kind === "add" && "bg-success/10",
+              line.kind === "del" && "bg-danger/10",
+              (line.kind === "meta" || line.kind === "context") && "text-fg",
+            )}
+          >
+            <span className="inline-block w-12 shrink-0 select-none pr-3 text-right text-fg-muted">
+              {line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
+            </span>
+            <span className="whitespace-pre">{line.content}</span>
+          </div>
+        ))}
+      </code>
+    </pre>
+  );
+}
+
+interface ParsedLine {
+  kind: "context" | "add" | "del" | "meta";
+  content: string;
+}
+
+function parsePatch(patch: string): ParsedLine[] {
+  const out: ParsedLine[] = [];
+  let inHunk = false;
+  for (const raw of patch.split("\n")) {
+    if (
+      raw.startsWith("diff --git ") ||
+      raw.startsWith("index ") ||
+      raw.startsWith("--- ") ||
+      raw.startsWith("+++ ") ||
+      raw.startsWith("new file") ||
+      raw.startsWith("deleted file") ||
+      raw.startsWith("old mode") ||
+      raw.startsWith("new mode") ||
+      raw.startsWith("similarity ") ||
+      raw.startsWith("rename ") ||
+      raw.startsWith("copy ")
+    ) {
+      continue;
+    }
+    if (raw.startsWith("@@")) {
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk) continue;
+    if (raw.length === 0) {
+      out.push({ kind: "context", content: "" });
+      continue;
+    }
+    const c = raw[0];
+    const content = raw.slice(1);
+    if (c === "+") out.push({ kind: "add", content });
+    else if (c === "-") out.push({ kind: "del", content });
+    else if (c === " ") out.push({ kind: "context", content });
+    else out.push({ kind: "meta", content: raw });
+  }
+  return out;
 }
 
 function CommitHeader({
