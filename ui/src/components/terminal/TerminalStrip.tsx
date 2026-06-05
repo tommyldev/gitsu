@@ -14,6 +14,14 @@
  * for a worktree removes the worktree's layout entirely. Splitters
  * are draggable (clamped 15%..85% so panes never get squashed).
  *
+ * Terminals are bound to their worktree: switching worktrees shows
+ * that worktree's existing terminals (or a "spawning…" placeholder
+ * while the first one starts). The shell process lives in the
+ * backend registry for the lifetime of the app, so the same shell
+ * (with its scrollback) reappears when you switch back. The PTY
+ * is only torn down when the worktree itself is removed
+ * (`wt_remove` → `pty.rs::teardown_for_worktree`).
+ *
  * When the graph is hidden (`fillsAvailable`), the strip fills the
  * rest of the dashboard row instead of being a fixed-height strip.
  */
@@ -21,10 +29,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import "@xterm/xterm/css/xterm.css";
-import { listen } from "@tauri-apps/api/event";
 import clsx from "clsx";
-import { ChevronDown, ChevronUp, X, Terminal as TerminalIcon, Rows2, Columns2, Plus, Maximize2, Minimize2, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronUp, X, Terminal as TerminalIcon, Rows2, Columns2, Maximize2, Minimize2, RotateCcw } from "lucide-react";
 import { useRepoStore } from "@/stores/repo";
 import { useTerminalStore, type Layout, type SplitDir } from "@/stores/terminal";
 import { displayBranch, isDetached } from "@/lib/worktree";
@@ -33,7 +41,11 @@ import { displayBranch, isDetached } from "@/lib/worktree";
 
 export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boolean }) {
   const repo = useRepoStore((s) => s.repo);
-  const worktrees = useRepoStore((s) => s.worktrees?.items ?? []);
+  // NOTE: keep the `?? []` OUTSIDE the selector. `?? []` inside the
+  // selector creates a fresh empty array on every render while the
+  // repo is null, and `Object.is([], [])` is false — so Zustand sees
+  // a "change" and the useSyncExternalStore loop spins.
+  const worktrees = useRepoStore((s) => s.worktrees?.items) ?? [];
   const selectedWorktree = useTerminalStore((s) => s.selectedWorktree);
   const setSelectedWorktree = useTerminalStore((s) => s.setSelectedWorktree);
   const [collapsed, setCollapsed] = useState(false);
@@ -72,6 +84,28 @@ export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boo
   // Count panes for the badge — number of leaves in the tree across
   // all worktrees, or just the session count.
   const liveCount = useTerminalStore((s) => s.sessions.size);
+
+  // Auto-spawn a terminal the first time a worktree is selected. The
+  // PTY (and its shell process) stays alive after the first spawn —
+  // switching worktrees and switching back reuses the same shell,
+  // with the store's `pendingData` buffer replaying the recent
+  // scrollback (bounded by PENDING_DATA_CAP).
+  const autoSpawnRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!selectedWorktree) return;
+    const wt = selectedWorktree;
+    // Layout already exists → a terminal is alive for this worktree.
+    if (useTerminalStore.getState().layouts.has(wt)) return;
+    // React 19 strict mode runs effects twice in dev; dedupe so we
+    // don't leak a second PTY in the backend registry.
+    if (autoSpawnRef.current.has(wt)) return;
+    autoSpawnRef.current.add(wt);
+    void ensurePane(wt)
+      .catch((e) => console.warn("auto-spawn pty failed", e))
+      .finally(() => {
+        autoSpawnRef.current.delete(wt);
+      });
+  }, [selectedWorktree, ensurePane]);
 
   if (!repo) return null;
   const selectedPath = selectedWorktree ?? repo.path;
@@ -173,7 +207,9 @@ export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boo
                 onFocus={setFocus}
               />
             ) : (
-              <EmptyCta worktree={selectedPath} onSpawn={ensurePane} />
+              <div className="flex h-full items-center justify-center text-[11px] text-fg-muted">
+                Spawning shell…
+              </div>
             )
           ) : (
             <div className="flex h-full items-center justify-center text-[13px] text-fg-muted">
@@ -216,40 +252,6 @@ function WorktreeTab({
       />
       <span className="max-w-[180px] truncate font-mono">{label}</span>
     </button>
-  );
-}
-
-// ── Empty state (no panes yet for this worktree) ───────────────
-
-function EmptyCta({ worktree, onSpawn }: { worktree: string; onSpawn: (wt: string) => Promise<number> }) {
-  const [spawning, setSpawning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const spawn = async () => {
-    setSpawning(true);
-    setError(null);
-    try {
-      await onSpawn(worktree);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSpawning(false);
-    }
-  };
-  const label = worktree.split("/").pop() ?? worktree;
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-fg-muted">
-      <TerminalIcon size={24} className="opacity-50" strokeWidth={1.5} />
-      <p className="text-[13px]">No terminals in <code className="font-mono text-fg">{label}</code>.</p>
-      <button
-        onClick={spawn}
-        disabled={spawning}
-        className="flex items-center gap-1.5 rounded-md border border-accent/30 bg-accent/10 px-3 py-1 text-[12px] text-accent hover:border-accent/50 hover:bg-accent/15 disabled:opacity-50 transition-colors duration-150"
-      >
-        <Plus size={12} strokeWidth={1.5} />
-        {spawning ? "Spawning…" : "Spawn terminal"}
-      </button>
-      {error && <p className="text-[11px] text-danger">{error}</p>}
-    </div>
   );
 }
 
@@ -510,6 +512,7 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
   const fitRef = useRef<FitAddon | null>(null);
   const send = useTerminalStore((s) => s.send);
   const resize = useTerminalStore((s) => s.resize);
+  const setSerializedState = useTerminalStore((s) => s.setSerializedState);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -527,7 +530,12 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
       rows: 24,
     });
     const fit = new FitAddon();
+    // SerializeAddon snapshots the xterm's visual state (scrollback
+    // + cursor). We capture on unmount (so the scrollback survives
+    // a worktree switch) and replay on the next mount.
+    const serializeAddon = new SerializeAddon();
     term.loadAddon(fit);
+    term.loadAddon(serializeAddon);
     term.open(containerRef.current);
     fit.fit();
     termRef.current = term;
@@ -538,20 +546,40 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
       void send(sessionId, bytes);
     });
 
-    // Subscribe to pty:data for this session id. The store already
-    // owns a pty:exit listener (and the server-side cleanup on close),
-    // so we only need data here.
-    let unlisten: (() => void) | undefined;
-    void listen<{ id: number; data: number[] }>(`pty:data:${sessionId}`, (event) => {
-      const bytes = new Uint8Array(event.payload.data);
+    // Restore the scrollback that was captured the last time this
+    // session was unmounted. Do this BEFORE `attachView` so the
+    // bytes that arrived while the view was away are appended
+    // below the restored state — not the other way around.
+    const prior = useTerminalStore.getState().sessions.get(sessionId)?.serializedState;
+    if (prior) {
       try {
-        term.write(bytes as unknown as string);
-      } catch {
-        term.write(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
+        term.write(prior);
+      } catch (e) {
+        console.warn("xterm write (restored state) failed", e);
       }
-    }).then((fn) => {
-      unlisten = fn;
-    });
+    }
+
+    // Attach to the store's PTY data stream. The store owns the
+    // `pty:data` subscription (see `terminal.ts` / `spawnPty`) and
+    // buffers output when no view is attached — so switching
+    // worktrees and coming back replays the recent scrollback
+    // (bounded by PENDING_DATA_CAP) instead of leaving xterm empty.
+    const { pending, unsubscribe } = useTerminalStore
+      .getState()
+      .attachView(sessionId, (bytes) => {
+        try {
+          term.write(bytes);
+        } catch {
+          term.write(new TextDecoder("utf-8", { fatal: false }).decode(bytes));
+        }
+      });
+    if (pending.length > 0) {
+      try {
+        term.write(pending);
+      } catch {
+        term.write(new TextDecoder("utf-8", { fatal: false }).decode(pending));
+      }
+    }
 
     const ro = new ResizeObserver(() => {
       try {
@@ -575,12 +603,21 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
       window.clearTimeout(t);
       ro.disconnect();
       dataDisp.dispose();
-      unlisten?.();
+      unsubscribe();
+      // Snapshot the visual state for the next mount BEFORE we
+      // dispose the xterm. If the session was already torn down
+      // (closePane / clear) `setSerializedState` is a no-op.
+      try {
+        const state = serializeAddon.serialize();
+        setSerializedState(sessionId, state);
+      } catch (e) {
+        console.warn("xterm serialize failed", e);
+      }
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [sessionId, send, resize]);
+  }, [sessionId, send, resize, setSerializedState]);
 
   // Overlay for terminal states (exited / error) — live status comes
   // from the store; we re-read it here so the overlay updates when

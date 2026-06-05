@@ -9,11 +9,18 @@
  * takes the parent's place.
  *
  * Lifecycle of a pane:
- *   1. `splitPane(worktree, paneId, dir)` creates a new sibling pane
+ *   1. The TerminalStrip auto-calls `ensurePane(worktree)` the first
+ *      time a worktree is selected, which spawns a PTY in the
+ *      worktree's cwd and creates a single-pane layout. Subsequent
+ *      selections of the same worktree are a no-op (the shell +
+ *      layout already exist; output buffered while the view was
+ *      unmounted is replayed via `pendingData` when the view
+ *      reattaches).
+ *   2. `splitPane(worktree, paneId, dir)` creates a new sibling pane
  *      and calls `pty_spawn` for it. The new pane gets focus.
- *   2. Output arrives via `pty:data:<id>` Tauri events; the xterm
+ *   3. Output arrives via `pty:data:<id>` Tauri events; the xterm
  *      instance writes to the screen.
- *   3. `closePane(worktree, paneId)` kills the PTY and removes the
+ *   4. `closePane(worktree, paneId)` kills the PTY and removes the
  *      pane. If it was the only pane, the worktree's layout is gone.
  *
  * Layouts are in-memory only (reset on app restart). Persisting the
@@ -45,7 +52,50 @@ export interface PtySession {
   worktree: string;
   status: PtyStatus;
   error: string | null;
+  /**
+   * Bytes that arrived from the PTY while no view was attached (e.g.
+   * the user switched worktrees). Drained by the next `attachView`.
+   * Bounded to `PENDING_DATA_CAP` so a long-running build can't OOM
+   * the renderer.
+   */
+  pendingData: Uint8Array;
+  /**
+   * Live views that want byte-by-byte delivery. When non-empty, new
+   * PTY output is dispatched here instead of going to `pendingData`.
+   */
+  dataListeners: Set<(data: Uint8Array) => void>;
+  /**
+   * Cleanup for the store-owned `pty:data` + `pty:exit` subscriptions.
+   * Called on pane close, repo clear, and PTY exit.
+   */
   unlisten?: () => void;
+  /**
+   * Snapshot of the xterm's visual state captured on the last view
+   * unmount (e.g. user switched worktrees). Written back to the new
+   * xterm on the next mount so the scrollback (and any in-progress
+   * prompt) survives the switch — the byte stream we replay from
+   * `pendingData` only covers the time the view was unmounted, so
+   * without this the user would see a blank terminal every time
+   * they came back. Set by `setSerializedState`; cleared on
+   * `closePane` / `clear` along with the rest of the session.
+   */
+  serializedState?: string;
+}
+
+/** Max bytes of PTY output retained per session while no view is
+ * attached. ~1 MB ≈ 5× xterm's default 1000-line scrollback. The
+ * buffer is a sliding window — oldest bytes are dropped on overflow. */
+const PENDING_DATA_CAP = 1024 * 1024;
+
+/** Append `chunk` to `buf`, returning a new Uint8Array. If the result
+ * would exceed `PENDING_DATA_CAP`, drop the oldest bytes (sliding
+ * window). Allocates twice on overflow, once otherwise. */
+function appendBounded(buf: Uint8Array, chunk: Uint8Array): Uint8Array {
+  const combined = new Uint8Array(buf.length + chunk.length);
+  combined.set(buf, 0);
+  combined.set(chunk, buf.length);
+  if (combined.length <= PENDING_DATA_CAP) return combined;
+  return combined.slice(combined.length - PENDING_DATA_CAP);
 }
 
 // ── Layout tree ────────────────────────────────────────────────
@@ -152,8 +202,10 @@ interface TerminalState {
 
   /** Ensure at least one pane exists in the worktree. If one
    * already does, this is a no-op and returns the existing session
-   * id. Used as the entry point for "open terminal" affordances
-   * (the strip's empty state, the merge dialog, etc.). */
+   * id. The TerminalStrip calls this automatically the first time
+   * a worktree is selected; other call sites (merge dialog, command
+   * palette, hotkeys) use it as the entry point for "open terminal"
+   * affordances. */
   ensurePane: (worktree: string) => Promise<number>;
   /** Split the given pane in the given direction. Spawns a PTY for the new sibling. */
   splitPane: (worktree: string, paneId: string, dir: SplitDir) => Promise<number>;
@@ -188,6 +240,35 @@ interface TerminalState {
   /** Resize a session's PTY. */
   resize: (id: number, cols: number, rows: number) => Promise<void>;
 
+  /**
+   * Attach a view to a PTY session. Atomically:
+   *   1. Drains any bytes buffered while no view was attached
+   *      (the user switched worktrees and came back) — these go in
+   *      the returned `pending` so the caller can write them to
+   *      xterm in one shot before live delivery starts.
+   *   2. Registers `cb` as a live listener for future PTY output.
+   * The returned `unsubscribe` removes the listener. While at least
+   * one listener is registered, new PTY output goes to listeners
+   * instead of `pendingData`.
+   *
+   * Returns `{ pending: Uint8Array, unsubscribe: () => void }`. If
+   * the session id is unknown, `pending` is empty and `unsubscribe`
+   * is a no-op.
+   */
+  attachView: (
+    sessionId: number,
+    cb: (data: Uint8Array) => void,
+  ) => { pending: Uint8Array; unsubscribe: () => void };
+
+  /**
+   * Persist a snapshot of the xterm visual state for the given
+   * session. Called by the view on unmount so the next mount can
+   * restore the scrollback (the byte stream replay in `attachView`
+   * only covers the time the view was unmounted). No-op if the
+   * session was already torn down.
+   */
+  setSerializedState: (sessionId: number, state: string) => void;
+
   /** Tear down everything (e.g. on repo close). */
   clear: () => Promise<void>;
 }
@@ -202,15 +283,59 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
     // `pty_spawn` resolves.
     set((s) => {
       const sessions = new Map(s.sessions);
-      sessions.set(tempId, { id: tempId, worktree, status: "spawning", error: null });
+      sessions.set(tempId, {
+        id: tempId,
+        worktree,
+        status: "spawning",
+        error: null,
+        pendingData: new Uint8Array(0),
+        dataListeners: new Set(),
+      });
       return { sessions };
     });
     try {
       const id = await invoke<number>("pty_spawn", { worktree, cols: 80, rows: 24 });
-      // Subscribe to exit events so we can mark the session as exited.
-      // (Data events are subscribed by the per-mount TerminalSessionView.)
+
+      // The store owns both subscriptions (data + exit) so PTY output
+      // is captured even when no view is mounted (e.g. user switched
+      // to a different worktree). The data handler either dispatches
+      // to live listeners or appends to `pendingData` (bounded).
       let unlistenExit: (() => void) | undefined;
-      const teardown = () => unlistenExit?.();
+      let unlistenData: (() => void) | undefined;
+      const teardown = () => {
+        unlistenExit?.();
+        unlistenData?.();
+      };
+
+      unlistenData = await listen<{ id: number; data: number[] }>(
+        `pty:data:${id}`,
+        (event) => {
+          const bytes = new Uint8Array(event.payload.data);
+          // If a view is attached, dispatch synchronously. Reading
+          // listeners via `get()` (not `set`) avoids creating a new
+          // state object on every keystroke echo.
+          const sess = get().sessions.get(id);
+          if (sess && sess.dataListeners.size > 0) {
+            for (const cb of sess.dataListeners) {
+              try {
+                cb(bytes);
+              } catch (e) {
+                console.warn("pty data listener threw", e);
+              }
+            }
+            return;
+          }
+          // No view — buffer in state, bounded by PENDING_DATA_CAP.
+          set((s) => {
+            const sessions = new Map(s.sessions);
+            const cur = sessions.get(id);
+            if (!cur) return {};
+            sessions.set(id, { ...cur, pendingData: appendBounded(cur.pendingData, bytes) });
+            return { sessions };
+          });
+        },
+      );
+
       unlistenExit = await listen<{ id: number; code: number | null }>(
         `pty:exit:${id}`,
         () => {
@@ -223,11 +348,21 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
           teardown();
         },
       );
+
       // Replace the placeholder with the real session.
       set((s) => {
         const sessions = new Map(s.sessions);
         sessions.delete(tempId);
-        sessions.set(id, { id, worktree, status: "running", error: null, unlisten: teardown });
+        sessions.set(id, {
+          id,
+          worktree,
+          status: "running",
+          error: null,
+          pendingData: new Uint8Array(0),
+          dataListeners: new Set(),
+          unlisten: teardown,
+          serializedState: undefined,
+        });
         return { sessions };
       });
       return id;
@@ -505,6 +640,53 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
       } catch (e) {
         console.debug("pty_resize", e);
       }
+    },
+
+    attachView: (sessionId, cb) => {
+      // Atomically: drain pending → register cb. Reading the pending
+      // buffer into a local first lets the view write it to xterm
+      // before live delivery starts. If the session id is unknown
+      // (e.g. it was just closed), we return an empty buffer and a
+      // no-op unsubscribe.
+      let pending: Uint8Array = new Uint8Array(0);
+      set((s) => {
+        const sessions = new Map(s.sessions);
+        const cur = sessions.get(sessionId);
+        if (!cur) return {};
+        pending = cur.pendingData;
+        const listeners = new Set(cur.dataListeners);
+        listeners.add(cb);
+        sessions.set(sessionId, {
+          ...cur,
+          pendingData: new Uint8Array(0),
+          dataListeners: listeners,
+        });
+        return { sessions };
+      });
+      return {
+        pending,
+        unsubscribe: () => {
+          set((s) => {
+            const sessions = new Map(s.sessions);
+            const cur = sessions.get(sessionId);
+            if (!cur) return {};
+            const listeners = new Set(cur.dataListeners);
+            listeners.delete(cb);
+            sessions.set(sessionId, { ...cur, dataListeners: listeners });
+            return { sessions };
+          });
+        },
+      };
+    },
+
+    setSerializedState: (sessionId, state) => {
+      set((s) => {
+        const sessions = new Map(s.sessions);
+        const cur = sessions.get(sessionId);
+        if (!cur) return {};
+        sessions.set(sessionId, { ...cur, serializedState: state });
+        return { sessions };
+      });
     },
 
     clear: async () => {

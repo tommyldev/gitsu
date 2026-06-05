@@ -58,7 +58,8 @@ interface Props {
 export function CommandPalette(props: Props) {
   const repo = useRepoStore((s) => s.repo);
   const refresh = useRepoStore((s) => s.refresh);
-  const worktrees = useRepoStore((s) => s.worktrees?.items ?? []);
+  // Keep `?? []` outside the selector — see TerminalStrip for why.
+  const worktrees = useRepoStore((s) => s.worktrees?.items) ?? [];
   const hasLayout = useTerminalStore((s) =>
     s.selectedWorktree ? !!s.layouts.get(s.selectedWorktree) : false,
   );
