@@ -360,6 +360,184 @@ pub async fn pty_list() -> Result<Vec<crate::pty::PtyInfo>> {
     Ok(crate::pty::list())
 }
 
+/// Look up the current CWD of a PTY session. Returns `None` if the
+/// session is unknown (e.g. it just exited). The CWD is updated via
+/// OSC 7 sequences parsed in the reader thread; if the shell never
+/// emits one, this returns the worktree root that the session
+/// started in.
+#[tauri::command]
+pub async fn pty_cwd(id: PtyId) -> Result<Option<String>> {
+    Ok(crate::pty::cwd(id).map(|p| p.display().to_string()))
+}
+
+// ── Directory explorer (M2.1) ──────────────────────────────────
+
+/// One entry in a directory listing. The frontend renders these
+/// in the directory explorer (right sidebar in terminal view).
+#[derive(Serialize)]
+pub struct DirEntry {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    /// File size in bytes. `None` for directories (or files we
+    /// couldn't stat).
+    pub size: Option<u64>,
+}
+
+/// List the immediate children of `path`. Sorted case-insensitively
+/// with directories first — the order the directory explorer
+/// renders.
+///
+/// Symlinks are reported by what they *point to*: a symlink to a
+/// directory is reported as `is_dir = true`. `.git` is always
+/// hidden — the explorer is for working-tree files, not internals.
+#[tauri::command]
+pub async fn list_directory(path: PathBuf) -> Result<Vec<DirEntry>> {
+    tokio::task::spawn_blocking(move || {
+        let mut entries = Vec::new();
+        let dir = std::fs::read_dir(&path)
+            .map_err(|e| Error::Internal(format!("read_dir {}: {e}", path.display())))?;
+        for entry in dir {
+            let entry = entry.map_err(|e| {
+                Error::Internal(format!("dir entry in {}: {e}", path.display()))
+            })?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            // Always hide .git — the directory explorer is for
+            // working-tree files, not git internals.
+            if name == ".git" {
+                continue;
+            }
+            let p = entry.path();
+            // Resolve symlinks for the is_dir decision. A broken
+            // symlink is reported as a file with size 0.
+            let meta = std::fs::metadata(&p).ok();
+            let target_meta = std::fs::metadata(&p)
+            .or_else(|_| std::fs::symlink_metadata(&p))
+            .ok();
+            let is_dir = target_meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+            let size = if is_dir {
+                None
+            } else {
+                meta.as_ref().map(|m| m.len())
+            };
+            entries.push(DirEntry {
+                name,
+                path: p.display().to_string(),
+                is_dir,
+                size,
+            });
+        }
+        // Directories first; within each group, case-insensitive
+        // alphabetical. Stable sort preserves the original order on
+        // equal keys (we don't depend on it, but it's safer).
+        entries.sort_by(|a, b| {
+            if a.is_dir != b.is_dir {
+                // true > false → directories come first when
+                // sorting ascending; we want dirs first, so use
+                // b.is_dir.cmp(&a.is_dir) to flip.
+                b.is_dir.cmp(&a.is_dir)
+            } else {
+                a.name.to_lowercase().cmp(&b.name.to_lowercase())
+            }
+        });
+        Ok::<_, Error>(entries)
+    })
+    .await
+    .map_err(|e| Error::Internal(format!("list_directory task: {e}")))?
+}
+
+/// Walk `root` recursively and return file paths (relative to
+/// `root`, using forward slashes) whose **filename** contains
+/// `pattern` (case-insensitive substring match). Used by the
+/// directory explorer's search bar.
+///
+/// We don't index file *contents* here — that's a follow-up. The
+/// use case is "I have a file called `auth-flow.ts` somewhere in
+/// this worktree, where is it?"
+#[tauri::command]
+pub async fn search_files(root: PathBuf, pattern: String) -> Result<Vec<String>> {
+    tokio::task::spawn_blocking(move || {
+        let needle = pattern.to_lowercase();
+        let mut results = Vec::new();
+        for dent in walkdir::WalkDir::new(&root)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            // Always skip the .git directory.
+            if dent
+                .path()
+                .components()
+                .any(|c| c.as_os_str() == ".git")
+            {
+                continue;
+            }
+            if !dent.file_type().is_file() {
+                continue;
+            }
+            let name = dent.file_name().to_string_lossy().to_string();
+            if needle.is_empty() || name.to_lowercase().contains(&needle) {
+                // Forward-slash relative path for display in the
+                // search results list.
+                let rel = dent
+                    .path()
+                    .strip_prefix(&root)
+                    .map_err(|e| Error::Internal(format!("strip_prefix: {e}")))?;
+                // walkdir uses OS-native separators; normalize to
+                // forward slashes for display.
+                let mut s = String::new();
+                for (i, comp) in rel.components().enumerate() {
+                    if i > 0 {
+                        s.push('/');
+                    }
+                    s.push_str(&comp.as_os_str().to_string_lossy());
+                }
+                results.push(s);
+            }
+        }
+        results.sort();
+        Ok::<_, Error>(results)
+    })
+    .await
+    .map_err(|e| Error::Internal(format!("search_files task: {e}")))?
+}
+
+/// Read a file from the worktree filesystem as a UTF-8 string.
+/// Used by the file viewer pane (opened from the directory
+/// explorer). The existing `file_content` command reads from a
+/// git ref; this one reads from the working tree directly.
+///
+/// Returns `Ok(None)` for binary files (those with invalid UTF-8
+/// or NUL bytes in the first 8 KiB — a simple binary heuristic).
+#[tauri::command]
+pub async fn read_file(path: PathBuf) -> Result<Option<String>> {
+    tokio::task::spawn_blocking(move || {
+        let bytes = std::fs::read(&path)
+            .map_err(|e| Error::Internal(format!("read_file {}: {e}", path.display())))?;
+        // Binary sniff: a NUL byte in the first 8 KiB usually means
+        // the file isn't text. We bail rather than rendering
+        // garbage.
+        const SNIFF: usize = 8 * 1024;
+        if bytes.iter().take(SNIFF).any(|b| *b == 0) {
+            return Ok(None);
+        }
+        let s = String::from_utf8(bytes).map_err(|_| {
+            // Invalid UTF-8 — treat as binary for the UI's
+            // purposes, but don't surface an error to the user
+            // (just signal "can't preview"). The Rust type forces
+            // us to wrap the original bytes' lossy-decoded form
+            // anyway, so we return Ok(None).
+            Error::Internal("binary".to_string())
+        });
+        match s {
+            Ok(s) => Ok(Some(s)),
+            Err(_) => Ok(None),
+        }
+    })
+    .await
+    .map_err(|e| Error::Internal(format!("read_file task: {e}")))?
+}
+
 // ── M7: merge ──────────────────────────────────────────────────
 
 /// Compute a merge preview. Used by the M7 Merge dialog to show the

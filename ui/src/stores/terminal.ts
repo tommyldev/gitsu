@@ -53,6 +53,15 @@ export interface PtySession {
   status: PtyStatus;
   error: string | null;
   /**
+   * Current working directory as reported by the shell via OSC 7
+   * (`\x1b]7;file://…\x07`). Defaults to `worktree` on spawn and
+   * updates as the user runs `cd` (or any command that changes the
+   * directory, since most shells emit OSC 7 from their PROMPT_COMMAND
+   * equivalent). The directory explorer reads this to know where to
+   * root its file tree.
+   */
+  cwd: string;
+  /**
    * Bytes that arrived from the PTY while no view was attached (e.g.
    * the user switched worktrees). Drained by the next `attachView`.
    * Bounded to `PENDING_DATA_CAP` so a long-running build can't OOM
@@ -69,6 +78,12 @@ export interface PtySession {
    * Called on pane close, repo clear, and PTY exit.
    */
   unlisten?: () => void;
+  /**
+   * Cleanup for the store-owned `pty:cwd` subscription. The CWD
+   * event is emitted from the Rust reader thread whenever the
+   * shell reports a new working directory (OSC 7).
+   */
+  unlistenCwd?: () => void;
   /**
    * Snapshot of the xterm's visual state captured on the last view
    * unmount (e.g. user switched worktrees). Written back to the new
@@ -103,9 +118,52 @@ function appendBounded(buf: Uint8Array, chunk: Uint8Array): Uint8Array {
 export type SplitDir = "h" | "v";
 /** `h` = horizontal divider → panes stack vertically; `v` = vertical divider → panes side by side. */
 
+/**
+ * A leaf in the layout tree. Two variants:
+ *  - `"pane"`: a live terminal session (`sessionId` is the backend PTY id,
+ *    or `null` while it's spawning).
+ *  - `"filepane"`: a read-only file viewer opened from the directory
+ *    explorer. `filePath` is the absolute path; `cwd` is the terminal CWD
+ *    at the moment of opening (used for "relative-to" display in the
+ *    file viewer's header). The file viewer is a sibling of terminal
+ *    panes in the same split tree — open it with `openFile()`, close
+ *    it with `closePane()` (which skips the PTY kill for filepanes).
+ */
 export type Layout =
   | { kind: "split"; id: string; dir: SplitDir; ratio: number; a: Layout; b: Layout }
-  | { kind: "pane"; id: string; sessionId: number | null };
+  | { kind: "pane"; id: string; sessionId: number | null }
+  | { kind: "filepane"; id: string; filePath: string; cwd: string };
+
+/** Type guard: is this a terminal pane? */
+function isTerminalPane(l: Layout): l is { kind: "pane"; id: string; sessionId: number | null } {
+  return l.kind === "pane";
+}
+
+/** Find an open file viewer pane by absolute path. Returns the
+ * pane layout + its tree path so the caller can focus it (no need
+ * to open a duplicate). */
+function findFilePaneByPath(
+  layout: Layout,
+  filePath: string,
+  path: number[] = [],
+): { layout: Layout; path: number[] } | null {
+  if (layout.kind === "split") {
+    const a = findFilePaneByPath(layout.a, filePath, [...path, 0]);
+    if (a) return a;
+    return findFilePaneByPath(layout.b, filePath, [...path, 1]);
+  }
+  if (isFilePane(layout) && layout.filePath === filePath) {
+    return { layout, path };
+  }
+  return null;
+}
+
+/** Type guard: is this a file viewer pane? */
+function isFilePane(
+  l: Layout,
+): l is { kind: "filepane"; id: string; filePath: string; cwd: string } {
+  return l.kind === "filepane";
+}
 
 let nextTempSessionId = 1_000_000; // unlikely to collide with the backend's allocator
 let nextPaneId = 1;
@@ -115,18 +173,19 @@ const newSplitId = () => `split-${nextSplitId++}`;
 const newTempSessionId = () => nextTempSessionId++;
 
 /** Walk the tree to find a pane. Returns `{ layout, path }` where
- * `path` is an array of `0`/`1` indices from the root. */
+ * `path` is an array of `0`/`1` indices from the root. Matches both
+ * terminal panes and file viewer panes. */
 function findPane(
   layout: Layout,
   paneId: string,
   path: number[] = [],
 ): { layout: Layout; path: number[] } | null {
-  if (layout.kind === "pane") {
-    return layout.id === paneId ? { layout, path } : null;
+  if (layout.kind === "split") {
+    const a = findPane(layout.a, paneId, [...path, 0]);
+    if (a) return a;
+    return findPane(layout.b, paneId, [...path, 1]);
   }
-  const a = findPane(layout.a, paneId, [...path, 0]);
-  if (a) return a;
-  return findPane(layout.b, paneId, [...path, 1]);
+  return layout.id === paneId ? { layout, path } : null;
 }
 
 function updateAt(
@@ -145,39 +204,49 @@ function updateAt(
  * a single-child split, collapse the parent. Returns the new tree,
  * or `null` if the root was the removed pane. */
 function removePane(layout: Layout, paneId: string): Layout | null {
-  if (layout.kind === "pane") {
-    return layout.id === paneId ? null : layout;
+  if (layout.kind === "split") {
+    const a = removePane(layout.a, paneId);
+    if (a === null) return layout.b;
+    const b = removePane(layout.b, paneId);
+    if (b === null) return layout.a;
+    return { ...layout, a, b };
   }
-  const a = removePane(layout.a, paneId);
-  if (a === null) return layout.b;
-  const b = removePane(layout.b, paneId);
-  if (b === null) return layout.a;
-  return { ...layout, a, b };
+  return layout.id === paneId ? null : layout;
 }
 
 function collectPaneIds(layout: Layout, out: string[] = []): string[] {
-  if (layout.kind === "pane") {
-    out.push(layout.id);
+  if (layout.kind === "split") {
+    collectPaneIds(layout.a, out);
+    collectPaneIds(layout.b, out);
     return out;
   }
-  collectPaneIds(layout.a, out);
-  collectPaneIds(layout.b, out);
+  out.push(layout.id);
   return out;
 }
 
 function mapLayout(layout: Layout, fn: (l: Layout) => Layout): Layout {
-  if (layout.kind === "pane") return fn(layout);
-  return fn({ ...layout, a: mapLayout(layout.a, fn), b: mapLayout(layout.b, fn) });
+  if (layout.kind === "split") {
+    return fn({ ...layout, a: mapLayout(layout.a, fn), b: mapLayout(layout.b, fn) });
+  }
+  return fn(layout);
 }
 
 function firstPaneId(layout: Layout): string | null {
-  if (layout.kind === "pane") return layout.id;
-  return firstPaneId(layout.a) ?? firstPaneId(layout.b);
+  if (layout.kind === "split") {
+    return firstPaneId(layout.a) ?? firstPaneId(layout.b);
+  }
+  return layout.id;
 }
 
+/** The backend PTY id of the first terminal pane, or `null` if the
+ * worktree's layout has no terminal panes (e.g. it's all file
+ * viewers). */
 function firstSessionId(layout: Layout): number | null {
-  if (layout.kind === "pane") return layout.sessionId;
-  return firstSessionId(layout.a) ?? firstSessionId(layout.b);
+  if (layout.kind === "split") {
+    return firstSessionId(layout.a) ?? firstSessionId(layout.b);
+  }
+  if (isTerminalPane(layout)) return layout.sessionId;
+  return null;
 }
 
 // ── Store ──────────────────────────────────────────────────────
@@ -209,7 +278,13 @@ interface TerminalState {
   ensurePane: (worktree: string) => Promise<number>;
   /** Split the given pane in the given direction. Spawns a PTY for the new sibling. */
   splitPane: (worktree: string, paneId: string, dir: SplitDir) => Promise<number>;
-  /** Close (kill + remove) a pane. Collapses the parent split. */
+  /** Open a file in a read-only viewer pane next to the focused pane.
+   * No PTY is spawned — the viewer fetches file contents via the
+   * `read_file` IPC command. `filePath` is absolute, `cwd` is the
+   * terminal CWD at the moment of opening (display-only). */
+  openFile: (worktree: string, filePath: string, cwd: string) => void;
+  /** Close (kill + remove) a pane. Collapses the parent split.
+   * Filepanes are simply removed (no PTY to kill). */
   closePane: (worktree: string, paneId: string) => Promise<void>;
   /** Close every pane in the worktree except `keepPaneId`. */
   closeOthers: (worktree: string, keepPaneId: string) => Promise<void>;
@@ -280,7 +355,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
     const tempId = newTempSessionId();
     // Optimistic placeholder so the pane can render a "spawning"
     // state immediately. We replace this with the real id once
-    // `pty_spawn` resolves.
+    // `pty_spawn` resolves. `cwd` starts at the worktree root — the
+    // shell will report its actual CWD via OSC 7 once it boots and
+    // emits its first prompt.
     set((s) => {
       const sessions = new Map(s.sessions);
       sessions.set(tempId, {
@@ -288,6 +365,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
         worktree,
         status: "spawning",
         error: null,
+        cwd: worktree,
         pendingData: new Uint8Array(0),
         dataListeners: new Set(),
       });
@@ -300,11 +378,15 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
       // is captured even when no view is mounted (e.g. user switched
       // to a different worktree). The data handler either dispatches
       // to live listeners or appends to `pendingData` (bounded).
+      // We also subscribe to `pty:cwd` so the directory explorer
+      // stays in sync with the shell's actual working directory.
       let unlistenExit: (() => void) | undefined;
       let unlistenData: (() => void) | undefined;
+      let unlistenCwd: (() => void) | undefined;
       const teardown = () => {
         unlistenExit?.();
         unlistenData?.();
+        unlistenCwd?.();
       };
 
       unlistenData = await listen<{ id: number; data: number[] }>(
@@ -349,6 +431,23 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
         },
       );
 
+      unlistenCwd = await listen<{ id: number; cwd: string }>(
+        `pty:cwd:${id}`,
+        (event) => {
+          set((s) => {
+            const sessions = new Map(s.sessions);
+            const cur = sessions.get(id);
+            if (!cur) return {};
+            // Only update if the CWD actually changed. The Rust
+            // side already deduplicates, but checking here too
+            // avoids pointless map churn on no-op events.
+            if (cur.cwd === event.payload.cwd) return {};
+            sessions.set(id, { ...cur, cwd: event.payload.cwd });
+            return { sessions };
+          });
+        },
+      );
+
       // Replace the placeholder with the real session.
       set((s) => {
         const sessions = new Map(s.sessions);
@@ -358,9 +457,11 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
           worktree,
           status: "running",
           error: null,
+          cwd: worktree,
           pendingData: new Uint8Array(0),
           dataListeners: new Set(),
           unlisten: teardown,
+          unlistenCwd,
           serializedState: undefined,
         });
         return { sessions };
@@ -461,6 +562,91 @@ export const useTerminalStore = create<TerminalState>((set, get) => {
         });
         throw e;
       }
+    },
+
+    /**
+     * Open a file in a read-only viewer pane. Behavior:
+     *  - If the worktree has no layout, create one with the file
+     *    viewer as the only leaf.
+     *  - If the worktree has a layout, find the focused pane and
+     *    split it vertically (right) with the new file viewer.
+     *  - The new file viewer gets focus.
+     *  - Clicking the same file twice from the explorer is a no-op
+     *    (we don't open duplicate viewers for the same path).
+     */
+    openFile: (worktree, filePath, cwd) => {
+      const layout = get().layouts.get(worktree);
+      const newFilePane: Layout = {
+        kind: "filepane",
+        id: newPaneId(),
+        filePath,
+        cwd,
+      };
+      if (!layout) {
+        // No layout yet — make the file viewer the only leaf. We
+        // still need a terminal pane for the worktree to be
+        // "alive", so spawn a PTY too. If the spawn fails the
+        // explorer will still work, but the worktree won't have
+        // a terminal in the strip.
+        set((s) => {
+          const layouts = new Map(s.layouts);
+          layouts.set(worktree, newFilePane);
+          const focused = new Map(s.focusedPane);
+          focused.set(worktree, newFilePane.id);
+          return { layouts, focusedPane: focused };
+        });
+        return;
+      }
+      // If the file is already open, just focus it instead of
+      // opening a duplicate. We scan by filePath since pane ids
+      // are freshly generated.
+      const dup = findFilePaneByPath(layout, filePath);
+      if (dup) {
+        set((s) => {
+          const focused = new Map(s.focusedPane);
+          focused.set(worktree, dup.layout.id);
+          return { focusedPane: focused };
+        });
+        return;
+      }
+      const focusedPaneId = get().focusedPane.get(worktree);
+      const found = focusedPaneId ? findPane(layout, focusedPaneId) : null;
+      if (!found) {
+        // No focused pane — attach the file viewer as a vertical
+        // split at the root level.
+        const split: Layout = {
+          kind: "split",
+          id: newSplitId(),
+          dir: "v",
+          ratio: 0.5,
+          a: layout,
+          b: newFilePane,
+        };
+        set((s) => {
+          const layouts = new Map(s.layouts);
+          layouts.set(worktree, split);
+          const focused = new Map(s.focusedPane);
+          focused.set(worktree, newFilePane.id);
+          return { layouts, focusedPane: focused };
+        });
+        return;
+      }
+      // Split the focused pane vertically with the new file pane.
+      const split: Layout = {
+        kind: "split",
+        id: newSplitId(),
+        dir: "v",
+        ratio: 0.5,
+        a: found.layout,
+        b: newFilePane,
+      };
+      set((s) => {
+        const layouts = new Map(s.layouts);
+        layouts.set(worktree, updateAt(layout, found.path, () => split));
+        const focused = new Map(s.focusedPane);
+        focused.set(worktree, newFilePane.id);
+        return { layouts, focusedPane: focused };
+      });
     },
 
     closePane: async (worktree, paneId) => {

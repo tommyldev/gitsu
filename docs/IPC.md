@@ -162,6 +162,44 @@ hooks with approval status.
 `wt config state default-branch`. Returns the configured default
 branch (e.g. `"main"` or `"master"`).
 
+### Directory explorer (M2.1)
+
+The right sidebar in terminal view (`hideGraphPanel = true`) shows
+a file tree rooted at the focused terminal's CWD. Click a file to
+open it in a read-only viewer pane in the terminal strip.
+
+#### `list_directory(path: PathBuf) → DirEntry[]`
+
+List the immediate children of `path`. Sorted case-insensitively
+with directories first. The `.git` directory is always hidden.
+
+```ts
+interface DirEntry {
+  name: string;
+  path: string;     // absolute, OS-native separators
+  is_dir: boolean;
+  size: number | null;  // null for dirs
+}
+```
+
+#### `search_files(root: PathBuf, pattern: String) → String[]`
+
+Walk `root` recursively and return file paths whose **filename**
+contains `pattern` (case-insensitive substring match). Returns
+forward-slash paths relative to `root`. The `.git` directory is
+always skipped.
+
+The result is sorted alphabetically.
+
+#### `read_file(path: PathBuf) → String | null`
+
+Read the file at `path` from the working tree as UTF-8. Returns
+`null` for binary files (NUL byte in the first 8 KiB) — the
+explorer renders a "Binary file" placeholder rather than garbage.
+
+Note: this is distinct from `file_content` (above), which reads
+from a git ref. The explorer shows working-tree contents.
+
 ## Domain types
 
 ### `Worktree` (matches `wt list --format=json` v0.56.0)
@@ -307,6 +345,19 @@ interface StashPopResult {
 }
 ```
 
+### PTY (M2.1)
+
+The terminal strip uses a per-worktree `portable-pty` session. The
+frontend `terminal` store subscribes to per-session events; see
+the Events section below for the names.
+
+#### `pty_cwd(id: PtyId) → String | null`
+
+Look up the current working directory of a PTY session. Returns
+`null` if the session is unknown (e.g. it just exited). The CWD
+is initialized to the worktree root on spawn and updated as the
+shell emits OSC 7 sequences (`\x1b]7;file://…\x07`).
+
 ## Events (for v1.1 streaming)
 
 - `repo:changed` — `.git` internals watcher fired. Frontend refreshes
@@ -316,3 +367,12 @@ interface StashPopResult {
   modal.
 - `wt:hook-log` — background hook line arrived. Payload:
   `{ branch, line, stream }`.
+- `pty:data:<id>` — chunk of PTY output. Payload: `{ id, data: number[] }`.
+  The frontend xterm.js decodes and writes to the terminal. Base64
+  transport is not used — bytes are serialized as a JSON number array
+  to keep the event payload self-describing.
+- `pty:exit:<id>` — shell exited. Payload: `{ id, code: number | null }`.
+  Frontend marks the session as `exited` and tears down subscriptions.
+- `pty:cwd:<id>` — shell's CWD changed (OSC 7). Payload: `{ id, cwd: string }`.
+  The directory explorer mirrors this so its file tree is rooted at
+  the terminal's actual CWD.

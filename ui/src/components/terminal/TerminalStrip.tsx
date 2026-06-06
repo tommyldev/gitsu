@@ -36,6 +36,7 @@ import { ChevronDown, ChevronUp, X, Terminal as TerminalIcon, Rows2, Columns2, M
 import { useRepoStore } from "@/stores/repo";
 import { useTerminalStore, type Layout, type SplitDir } from "@/stores/terminal";
 import { displayBranch, isDetached } from "@/lib/worktree";
+import { FileViewerPane } from "@/components/directory/FileViewerPane";
 
 // ── Outer container ────────────────────────────────────────────
 
@@ -314,6 +315,19 @@ function LayoutView({
         sessionId={layout.sessionId}
         isFocused={focusedPaneId === layout.id}
         onSplit={onSplit}
+        onClose={onClose}
+        onFocus={onFocus}
+      />
+    );
+  }
+  if (layout.kind === "filepane") {
+    return (
+      <FileViewerPane
+        paneId={layout.id}
+        worktree={worktree}
+        filePath={layout.filePath}
+        cwd={layout.cwd}
+        isFocused={focusedPaneId === layout.id}
         onClose={onClose}
         onFocus={onFocus}
       />
@@ -745,8 +759,10 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
  * has been removed. The store has a private `findPane`; we duplicate
  * the small walker here rather than export it just for this case. */
 function findPaneById(layout: Layout, paneId: string): Layout | null {
-  if (layout.kind === "pane") return layout.id === paneId ? layout : null;
-  return findPaneById(layout.a, paneId) ?? findPaneById(layout.b, paneId);
+  if (layout.kind === "split") {
+    return findPaneById(layout.a, paneId) ?? findPaneById(layout.b, paneId);
+  }
+  return layout.id === paneId ? layout : null;
 }
 
 // (no-op — silence the unused-import detector for some build setups)
