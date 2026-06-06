@@ -17,4 +17,5 @@ pub mod conflict;
 pub mod diff;
 pub mod graph;
 pub mod merge;
+pub mod ops;
 pub mod status;

@@ -218,6 +218,83 @@ the build script fetches the right one per target. See
 | `aarch64-apple-darwin`          | build      | `worktrunk-aarch64-apple-darwin`                   |
 | `x86_64-pc-windows-msvc`        | build      | `worktrunk-x86_64-pc-windows-msvc`                  |
 
+## Graph-view action bar (pull / push / branch / stash / pop)
+
+These commands back the five buttons at the top of the commit graph
+view. They run against the **active worktree**'s path (not the repo
+root), so each operation is scoped to the worktree's current branch
+and working tree.
+
+Pull and push shell out to system `git` (not libgit2) so the user's
+SSH agent, keychain, and credential helpers work without any
+gitsu-side configuration. Branch, stash, and pop use libgit2 — all
+local operations that don't need network credentials.
+
+### `git_pull(worktree: PathBuf) → RemoteOpResult`
+
+`git pull` in the given worktree. `GIT_TERMINAL_PROMPT=0` is set so
+the call never blocks waiting for a password; the GUI button click
+is the user's intent signal.
+
+```ts
+interface RemoteOpResult {
+  op: string;       // "pull"
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+}
+```
+
+### `git_push(worktree: PathBuf, remote?: string, branch?: string, set_upstream?: bool) → RemoteOpResult`
+
+`git push` in the given worktree. All args are optional — when both
+`remote` and `branch` are omitted, this is exactly `git push` (uses
+the branch's configured upstream). `set_upstream` is the `-u` flag,
+useful for the first push of a new branch.
+
+### `git_branch_create(worktree: PathBuf, name: string) → BranchCreateResult`
+
+Creates a new local branch in the worktree at HEAD. Does **not**
+check it out. The result's `sha` is the HEAD SHA the new branch
+points to; the UI uses it for a confirmation line.
+
+```ts
+interface BranchCreateResult {
+  name: string;
+  sha: string;             // HEAD SHA at the time of the call
+  already_checked_out: boolean;
+}
+```
+
+### `git_stash_push(worktree: PathBuf, message?: string) → StashPushResult`
+
+`git stash push -u` in the worktree (libgit2; includes untracked).
+When the worktree is clean, `no_changes` is true and the call still
+succeeds (the UI surfaces "Nothing to stash" instead of an error).
+
+```ts
+interface StashPushResult {
+  oid: string;             // empty when no_changes
+  no_changes: boolean;
+  message: string;
+}
+```
+
+### `git_stash_pop(worktree: PathBuf) → StashPopResult`
+
+`git stash pop` in the worktree. Applies the top stash and drops
+it. On conflicts the command returns an `Error`; the user is
+expected to resolve via the existing commit panel + diff viewer
+(M3). The `had_conflicts` flag is reserved for a future enhancement
+that lets the IPC complete the pop with conflicts left in the index.
+
+```ts
+interface StashPopResult {
+  oid: string;
+  had_conflicts: boolean;
+}
+```
+
 ## Events (for v1.1 streaming)
 
 - `repo:changed` — `.git` internals watcher fired. Frontend refreshes

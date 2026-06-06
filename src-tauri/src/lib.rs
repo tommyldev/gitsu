@@ -125,6 +125,12 @@ pub fn run() {
             // ── approvals (M6) ──────────────────────────────────────────
             ipc::wt_approve_command,
             ipc::wt_clear_approvals,
+            // ── graph-view action bar (pull / push / branch / stash / pop)
+            ipc::git_pull,
+            ipc::git_push,
+            ipc::git_branch_create,
+            ipc::git_stash_push,
+            ipc::git_stash_pop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

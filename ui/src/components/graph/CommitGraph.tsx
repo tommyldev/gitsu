@@ -30,6 +30,7 @@ import { AlertCircle } from "lucide-react";
 import type { CommitNode, WorkingTree } from "@/lib/types";
 import type { LayoutEdge, LayoutRow } from "@/lib/dag";
 import { CommitContextMenu, type CommitMenuTarget } from "./CommitContextMenu";
+import { GitActionsBar } from "./GitActionsBar";
 
 // ── Layout constants ───────────────────────────────────────────
 
@@ -115,23 +116,32 @@ export function CommitGraph() {
 
   if (loading && !graph) {
     return (
-      <div className="flex h-full items-center justify-center text-fg-muted">
-        <span className="animate-pulse text-[13px]">Loading commit graph…</span>
+      <div className="flex h-full flex-col">
+        <GitActionsBar />
+        <div className="flex flex-1 items-center justify-center text-fg-muted">
+          <span className="animate-pulse text-[13px]">Loading commit graph…</span>
+        </div>
       </div>
     );
   }
   if (error) {
     return (
-      <div className="m-4 flex items-start gap-2 rounded-md border border-danger/20 bg-danger/10 p-3 text-[13px] text-danger">
-        <AlertCircle size={16} className="mt-0.5 shrink-0" strokeWidth={1.5} />
-        <span>{error}</span>
+      <div className="flex h-full flex-col">
+        <GitActionsBar />
+        <div className="m-4 flex items-start gap-2 rounded-md border border-danger/20 bg-danger/10 p-3 text-[13px] text-danger">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" strokeWidth={1.5} />
+          <span>{error}</span>
+        </div>
       </div>
     );
   }
   if (!graph || !layout || layout.rows.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-fg-muted text-[13px]">
-        No commits in this worktree.
+      <div className="flex h-full flex-col">
+        <GitActionsBar />
+        <div className="flex flex-1 items-center justify-center text-fg-muted text-[13px]">
+          No commits in this worktree.
+        </div>
       </div>
     );
   }
@@ -161,125 +171,128 @@ export function CommitGraph() {
   const headColor = LANE_COLORS[headLane % LANE_COLORS.length];
 
   return (
-    <div
-      ref={containerRef}
-      className="relative h-full overflow-auto bg-bg"
-      onClick={closeMenu}
-    >
-      <svg
-        width={totalWidth}
-        height={totalHeight}
-        viewBox={`0 0 ${totalWidth} ${totalHeight}`}
-        style={{ display: "block" }}
+    <div className="flex h-full flex-col">
+      <GitActionsBar />
+      <div
+        ref={containerRef}
+        className="relative flex-1 overflow-auto bg-bg"
+        onClick={closeMenu}
       >
-        <defs>
-          <linearGradient id="accent-fade" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(94,106,210,0.6)" />
-            <stop offset="100%" stopColor="rgba(94,106,210,0)" />
-          </linearGradient>
-        </defs>
-        {/* Edges first (so circles sit on top of them) */}
-        <g>
-          {layout.edges.map((edge, i) => (
-            <EdgeLine
-              key={`e-${i}-${edge.from_sha}-${edge.to_sha}`}
-              edge={edge}
-              rowIndexBySha={layoutRowIndexBySha(layout.rows)}
-              yOffset={yOffset}
-            />
-          ))}
-          {/* Dotted connector from head commit down to the working-tree
-              node. Rendered with the edges so the head's solid circle
-              sits on top of it. */}
-          {hasUncommitted && workingTree && (
-            <line
-              x1={laneX(headLane)}
-              y1={yOffset - WORKING_TREE_ROW_HEIGHT / 2}
-              x2={laneX(headLane)}
-              y2={yOffset + ROW_HEIGHT / 2}
-              stroke={headColor}
-              strokeWidth={1.5}
-              strokeDasharray="3,3"
-              opacity={0.55}
-            />
-          )}
-        </g>
-
-        {/* Track lines (vertical lines through rows where no commit sits
-            but a line is still passing through). Drawn before circles. */}
-        <g>
-          {layout.rows.map((row, i) => (
-            <TrackLines key={`t-${row.sha}`} row={row} rowIndex={i} yOffset={yOffset} />
-          ))}
-          {/* Dotted track line through the working-tree row. Same
-              visual language as the connector — emphasizes that the
-              working tree is "on the way" to a future commit. */}
-          {hasUncommitted && (
-            <line
-              x1={laneX(headLane)}
-              y1={0}
-              x2={laneX(headLane)}
-              y2={WORKING_TREE_ROW_HEIGHT}
-              stroke={headColor}
-              strokeWidth={1.5}
-              strokeDasharray="3,3"
-              opacity={0.4}
-            />
-          )}
-        </g>
-
-        {/* Commit circles + label columns */}
-        <g>
-          {layout.rows.map((row, i) => {
-            const node = graph.nodes.find((n) => n.sha === row.sha);
-            if (!node) return null;
-            return (
-              <CommitRow
-                key={row.sha}
-                row={row}
-                node={node}
-                index={i}
+        <svg
+          width={totalWidth}
+          height={totalHeight}
+          viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+          style={{ display: "block" }}
+        >
+          <defs>
+            <linearGradient id="accent-fade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(94,106,210,0.6)" />
+              <stop offset="100%" stopColor="rgba(94,106,210,0)" />
+            </linearGradient>
+          </defs>
+          {/* Edges first (so circles sit on top of them) */}
+          <g>
+            {layout.edges.map((edge, i) => (
+              <EdgeLine
+                key={`e-${i}-${edge.from_sha}-${edge.to_sha}`}
+                edge={edge}
+                rowIndexBySha={layoutRowIndexBySha(layout.rows)}
                 yOffset={yOffset}
-                selected={selectedSha === row.sha}
-                totalWidth={totalWidth}
-                labelX={labelX}
-                authorX={authorX}
-                dateX={dateX}
-                messageX={messageX}
-                onSelect={() => select(row.sha)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  select(row.sha);
-                  setMenu({
-                    sha: row.sha,
-                    shortSha: row.sha.slice(0, 7),
-                    summary: node.summary,
-                    branches: row.branches,
-                    x: e.clientX,
-                    y: e.clientY,
-                  });
-                }}
               />
-            );
-          })}
-        </g>
+            ))}
+            {/* Dotted connector from head commit down to the working-tree
+                node. Rendered with the edges so the head's solid circle
+                sits on top of it. */}
+            {hasUncommitted && workingTree && (
+              <line
+                x1={laneX(headLane)}
+                y1={yOffset - WORKING_TREE_ROW_HEIGHT / 2}
+                x2={laneX(headLane)}
+                y2={yOffset + ROW_HEIGHT / 2}
+                stroke={headColor}
+                strokeWidth={1.5}
+                strokeDasharray="3,3"
+                opacity={0.55}
+              />
+            )}
+          </g>
 
-        {/* Working-tree pseudo-row. Drawn last so its hollow circle sits
-            on top of the connector. The row is a "preview" of the next
-            commit; not clickable in v1 (future: select HEAD and show
-            workdir_diff in the right pane). */}
-        {hasUncommitted && workingTree && (
-          <WorkingTreeRow
-            workingTree={workingTree}
-            lane={headLane}
-            y={0}
-            labelX={labelX}
-            messageX={messageX}
-          />
-        )}
-      </svg>
+          {/* Track lines (vertical lines through rows where no commit sits
+              but a line is still passing through). Drawn before circles. */}
+          <g>
+            {layout.rows.map((row, i) => (
+              <TrackLines key={`t-${row.sha}`} row={row} rowIndex={i} yOffset={yOffset} />
+            ))}
+            {/* Dotted track line through the working-tree row. Same
+                visual language as the connector — emphasizes that the
+                working tree is "on the way" to a future commit. */}
+            {hasUncommitted && (
+              <line
+                x1={laneX(headLane)}
+                y1={0}
+                x2={laneX(headLane)}
+                y2={WORKING_TREE_ROW_HEIGHT}
+                stroke={headColor}
+                strokeWidth={1.5}
+                strokeDasharray="3,3"
+                opacity={0.4}
+              />
+            )}
+          </g>
 
-      {menu && <CommitContextMenu target={menu} onClose={closeMenu} />}
+          {/* Commit circles + label columns */}
+          <g>
+            {layout.rows.map((row, i) => {
+              const node = graph.nodes.find((n) => n.sha === row.sha);
+              if (!node) return null;
+              return (
+                <CommitRow
+                  key={row.sha}
+                  row={row}
+                  node={node}
+                  index={i}
+                  yOffset={yOffset}
+                  selected={selectedSha === row.sha}
+                  totalWidth={totalWidth}
+                  labelX={labelX}
+                  authorX={authorX}
+                  dateX={dateX}
+                  messageX={messageX}
+                  onSelect={() => select(row.sha)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    select(row.sha);
+                    setMenu({
+                      sha: row.sha,
+                      shortSha: row.sha.slice(0, 7),
+                      summary: node.summary,
+                      branches: row.branches,
+                      x: e.clientX,
+                      y: e.clientY,
+                    });
+                  }}
+                />
+              );
+            })}
+          </g>
+
+          {/* Working-tree pseudo-row. Drawn last so its hollow circle sits
+              on top of the connector. The row is a "preview" of the next
+              commit; not clickable in v1 (future: select HEAD and show
+              workdir_diff in the right pane). */}
+          {hasUncommitted && workingTree && (
+            <WorkingTreeRow
+              workingTree={workingTree}
+              lane={headLane}
+              y={0}
+              labelX={labelX}
+              messageX={messageX}
+            />
+          )}
+        </svg>
+
+        {menu && <CommitContextMenu target={menu} onClose={closeMenu} />}
+      </div>
     </div>
   );
 }

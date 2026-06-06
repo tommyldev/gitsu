@@ -231,3 +231,38 @@ export interface ConflictParts {
   working: string | null;
   is_binary: boolean;
 }
+
+// ── Graph-view action bar ────────────────────────────────────
+
+/** Result of `git_pull` / `git_push`. */
+export interface RemoteOpResult {
+  /** "pull" or "push". */
+  op: string;
+  /** `git`'s exit code (0 = success). */
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Result of `git_branch_create` — a new local branch at HEAD. */
+export interface BranchCreateResult {
+  name: string;
+  /** SHA the new branch points to. */
+  sha: string;
+  /** True if the worktree was already on this branch. */
+  already_checked_out: boolean;
+}
+
+/** Result of `git_stash_push`. */
+export interface StashPushResult {
+  /** OID of the stash entry; empty when `no_changes` is true. */
+  oid: string;
+  no_changes: boolean;
+  message: string;
+}
+
+/** Result of `git_stash_pop`. */
+export interface StashPopResult {
+  oid: string;
+  had_conflicts: boolean;
+}

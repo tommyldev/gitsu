@@ -447,6 +447,76 @@ pub async fn wt_clear_approvals(
     wt::config_approvals_clear(&client).await
 }
 
+// ── Graph-view action bar: pull / push / branch / stash / pop ─────
+
+/// `git pull` in the given worktree. Runs system `git` (not libgit2)
+/// so the user's credential helpers, SSH agent, and keychain all just
+/// work. `GIT_TERMINAL_PROMPT=0` is set to keep the call
+/// non-interactive; the GUI button click is the user's intent signal.
+#[tauri::command]
+pub async fn git_pull(worktree: PathBuf) -> Result<crate::git::ops::RemoteOpResult> {
+    crate::git::ops::pull(&worktree).await
+}
+
+/// `git push` in the given worktree. `remote` and `branch` are
+/// optional — when both are None this is `git push` (uses the
+/// branch's configured upstream). `set_upstream` is the `-u` flag
+/// (also written as `--set-upstream`); useful for the first push
+/// of a new branch.
+#[tauri::command]
+pub async fn git_push(
+    worktree: PathBuf,
+    remote: Option<String>,
+    branch: Option<String>,
+    set_upstream: Option<bool>,
+) -> Result<crate::git::ops::RemoteOpResult> {
+    crate::git::ops::push(
+        &worktree,
+        remote.as_deref(),
+        branch.as_deref(),
+        set_upstream.unwrap_or(false),
+    )
+    .await
+}
+
+/// Create a new local branch in the worktree at HEAD (no checkout).
+/// Distinct from `wt_switch_create` which makes a new worktree
+/// directory; this is the "new line of work on the same checkout"
+/// action. Backend returns the SHA so the UI can show a confirmation.
+#[tauri::command]
+pub async fn git_branch_create(
+    worktree: PathBuf,
+    name: String,
+) -> Result<crate::git::ops::BranchCreateResult> {
+    tokio::task::spawn_blocking(move || crate::git::ops::branch_create(&worktree, &name))
+        .await
+        .map_err(|e| Error::Internal(format!("git_branch_create task: {e}")))?
+}
+
+/// `git stash push` in the worktree. `message` is optional (libgit2
+/// defaults to a generic message). When the worktree is clean, the
+/// result's `no_changes` flag is true and the UI can skip showing an
+/// error toast.
+#[tauri::command]
+pub async fn git_stash_push(
+    worktree: PathBuf,
+    message: Option<String>,
+) -> Result<crate::git::ops::StashPushResult> {
+    tokio::task::spawn_blocking(move || crate::git::ops::stash_push(&worktree, message.as_deref()))
+        .await
+        .map_err(|e| Error::Internal(format!("git_stash_push task: {e}")))?
+}
+
+/// `git stash pop` in the worktree. Applies the top stash and drops
+/// it. On conflicts the call returns an error; the user is expected
+/// to resolve via the existing commit panel + M3 diff viewer.
+#[tauri::command]
+pub async fn git_stash_pop(worktree: PathBuf) -> Result<crate::git::ops::StashPopResult> {
+    tokio::task::spawn_blocking(move || crate::git::ops::stash_pop(&worktree))
+        .await
+        .map_err(|e| Error::Internal(format!("git_stash_pop task: {e}")))?
+}
+
 #[derive(Serialize)]
 pub struct RecentRepo {
     pub path: PathBuf,
