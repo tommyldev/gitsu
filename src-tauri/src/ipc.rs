@@ -286,10 +286,34 @@ pub async fn hooks_snapshot(repo: PathBuf) -> Result<HookConfigSnapshot> {
 }
 
 #[tauri::command]
-pub async fn hooks_install(repo: PathBuf, with_worktreeinclude: bool) -> Result<HookConfigSnapshot> {
-    tokio::task::spawn_blocking(move || crate::hooks::install(&repo, with_worktreeinclude))
-        .await
-        .map_err(|e| Error::Internal(format!("hooks_install task: {e}")))?
+pub async fn hooks_install(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    repo: PathBuf,
+    with_worktreeinclude: bool,
+) -> Result<HookConfigSnapshot> {
+    let client = wt_for(&state, &app, repo.clone()).await?;
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::hooks::install(&repo, with_worktreeinclude)
+    })
+    .await
+    .map_err(|e| Error::Internal(format!("hooks_install task: {e}")))??;
+
+    // Pre-approve the command we just wrote, but only when the user
+    // actually consented to it being installed this call. This is the
+    // implicit-consent path for the M6 approval flow: clicking
+    // "Install" in the HooksManager is the user's signal that the
+    // command should run on first `wt switch --create` without
+    // re-prompting.
+    if outcome.newly_installed {
+        let _ = crate::worktrunk::commands::config_approvals_add(
+            &client,
+            "wt step copy-ignored",
+        )
+        .await;
+    }
+
+    Ok(outcome.snapshot)
 }
 
 #[tauri::command]

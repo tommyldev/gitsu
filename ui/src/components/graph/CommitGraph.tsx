@@ -255,6 +255,8 @@ export function CommitGraph() {
                     shortSha: row.sha.slice(0, 7),
                     summary: node.summary,
                     branches: row.branches,
+                    x: e.clientX,
+                    y: e.clientY,
                   });
                 }}
               />

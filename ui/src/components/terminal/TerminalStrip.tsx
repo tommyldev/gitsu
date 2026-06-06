@@ -81,6 +81,14 @@ export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boo
   const reopenLastClosed = useTerminalStore((s) => s.reopenLastClosed);
   const reopenStackSize = useTerminalStore((s) => s.reopenStack.length);
 
+  // All-worktree maps — read once so we can render every
+  // worktree's layout simultaneously (see body below) and hide
+  // the non-selected ones with CSS. This keeps TerminalSessionView
+  // components mounted (and their xterms alive) across worktree
+  // switches, avoiding the unmount → dispose → remount → restore
+  // cycle that was the root cause of the missing-history bugs.
+  const allLayouts = useTerminalStore((s) => s.layouts);
+
   // Count panes for the badge — number of leaves in the tree across
   // all worktrees, or just the session count.
   const liveCount = useTerminalStore((s) => s.sessions.size);
@@ -110,15 +118,6 @@ export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boo
   if (!repo) return null;
   const selectedPath = selectedWorktree ?? repo.path;
   const hasWorktrees = worktrees.length > 0;
-
-  // When zoomed, render only the zoomed pane at full size instead of
-  // the full split tree. If the zoomed pane is missing (e.g. it was
-  // just closed and the store didn't clear zoom in time), fall back
-  // to the normal layout.
-  const renderedLayout =
-    layout && zoomedPaneId
-      ? findPaneById(layout, zoomedPaneId) ?? layout
-      : layout;
 
   return (
     <div
@@ -196,21 +195,54 @@ export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boo
       {!collapsed && (
         <div className={fillsAvailable ? "min-h-0 flex-1 bg-bg" : "h-72 bg-bg"}>
           {hasWorktrees ? (
-            renderedLayout ? (
-              <LayoutView
-                worktree={selectedPath}
-                layout={renderedLayout}
-                focusedPaneId={focusedPaneId ?? null}
-                onSplit={splitPane}
-                onClose={closePane}
-                onRatio={setRatio}
-                onFocus={setFocus}
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-[11px] text-fg-muted">
-                Spawning shell…
-              </div>
-            )
+            <>
+              {/* Render EVERY worktree's layout. The selected one is
+                  visible; the rest are hidden with `display: none`.
+                  Keeping them mounted (never unmounting) means the
+                  xterm instances and their shells stay alive across
+                  tab switches — no dispose/recreate/restore cycle. */}
+              {worktrees.map((wt) => {
+                if (!wt.path) return null;
+                const wtLayout = allLayouts.get(wt.path);
+                if (!wtLayout) {
+                  // Only the selected worktree gets a placeholder;
+                  // the auto-spawn effect will create a layout soon.
+                  if (wt.path === selectedPath) {
+                    return (
+                      <div key={wt.path} className="flex h-full items-center justify-center text-[11px] text-fg-muted">
+                        Spawning shell…
+                      </div>
+                    );
+                  }
+                  return null;
+                }
+                const isSelected = wt.path === selectedPath;
+                // Only apply zoom for the visible worktree; hidden
+                // ones just render the full tree (zoom is irrelevant
+                // when you can't see it).
+                const rendered =
+                  isSelected && zoomedPaneId
+                    ? findPaneById(wtLayout, zoomedPaneId) ?? wtLayout
+                    : wtLayout;
+                return (
+                  <div
+                    key={wt.path}
+                    className="h-full w-full min-h-0 min-w-0"
+                    style={{ display: isSelected ? undefined : "none" }}
+                  >
+                    <LayoutView
+                      worktree={wt.path}
+                      layout={rendered}
+                      focusedPaneId={isSelected ? focusedPaneId ?? null : null}
+                      onSplit={splitPane}
+                      onClose={closePane}
+                      onRatio={setRatio}
+                      onFocus={isSelected ? setFocus : () => {}}
+                    />
+                  </div>
+                );
+              })}
+            </>
           ) : (
             <div className="flex h-full items-center justify-center text-[13px] text-fg-muted">
               No worktrees yet.
@@ -513,6 +545,16 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
   const send = useTerminalStore((s) => s.send);
   const resize = useTerminalStore((s) => s.resize);
   const setSerializedState = useTerminalStore((s) => s.setSerializedState);
+  // True once anything has been written to this xterm on the
+  // current mount (restored state, pending bytes, or live output).
+  // We only snapshot the visual state if there's something worth
+  // saving — otherwise React 19 strict mode's mount→cleanup→mount
+  // cycle (which runs on every fresh mount in dev) would overwrite
+  // the previously-saved scrollback with a fresh empty xterm's
+  // state. That bug was masked with a single terminal (the
+  // first-time empty is invisible) and blatant with multiple
+  // terminals (every pane lost its history on the next switch).
+  const hasContentRef = useRef(false);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -536,22 +578,43 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
     const serializeAddon = new SerializeAddon();
     term.loadAddon(fit);
     term.loadAddon(serializeAddon);
-    term.open(containerRef.current);
-    fit.fit();
-    termRef.current = term;
-    fitRef.current = fit;
+    hasContentRef.current = false;
 
+    // Register the keystroke handler before open. The textarea
+    // xterm uses to capture input only exists once `open` is
+    // called, so no keystrokes can land before that — but
+    // registering the listener now means it's live the moment
+    // open completes.
     const dataDisp = term.onData((data) => {
       const bytes = new TextEncoder().encode(data);
       void send(sessionId, bytes);
     });
 
-    // Restore the scrollback that was captured the last time this
-    // session was unmounted. Do this BEFORE `attachView` so the
-    // bytes that arrived while the view was away are appended
-    // below the restored state — not the other way around.
+    const markContent = () => {
+      hasContentRef.current = true;
+    };
+
+    // Restore the scrollback + replay pending bytes BEFORE
+    // `term.open`. Two reasons:
+    //
+    //   1. The SerializeAddon docs explicitly recommend it:
+    //      "When restoring a terminal it is best to do before
+    //      Terminal.open is called to avoid wasting CPU cycles
+    //      rendering incomplete frames."
+    //
+    //   2. More importantly in our case, at the moment this
+    //      effect runs the parent SplitView/PaneView has just
+    //      been committed but the container's size hasn't been
+    //      measured yet — particularly in a split layout, where
+    //      the flex math has more work to do. If we call
+    //      `fit.fit()` first it can resize the term to 0×0, and
+    //      bytes written to a 0×0 buffer are dropped. Writing at
+    //      the default 80×24 *before* open means the buffer is
+    //      preserved through the open + resize cycle and the
+    //      ResizeObserver's later fit reflows it to the real size.
     const prior = useTerminalStore.getState().sessions.get(sessionId)?.serializedState;
     if (prior) {
+      markContent();
       try {
         term.write(prior);
       } catch (e) {
@@ -559,14 +622,14 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
       }
     }
 
-    // Attach to the store's PTY data stream. The store owns the
-    // `pty:data` subscription (see `terminal.ts` / `spawnPty`) and
-    // buffers output when no view is attached — so switching
-    // worktrees and coming back replays the recent scrollback
-    // (bounded by PENDING_DATA_CAP) instead of leaving xterm empty.
+    // Attach to the store's PTY data stream and replay any bytes
+    // that arrived while the view was unmounted. Doing this
+    // before open means those bytes are part of the initial
+    // render rather than arriving after.
     const { pending, unsubscribe } = useTerminalStore
       .getState()
       .attachView(sessionId, (bytes) => {
+        markContent();
         try {
           term.write(bytes);
         } catch {
@@ -574,6 +637,7 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
         }
       });
     if (pending.length > 0) {
+      markContent();
       try {
         term.write(pending);
       } catch {
@@ -581,10 +645,34 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
       }
     }
 
+    // Now open the term — this flushes the buffer (prior + pending)
+    // and renders. We intentionally do NOT call `fit.fit()` here:
+    // at this point in the React lifecycle the parent split layout
+    // may not have been measured yet, so `getBoundingClientRect()`
+    // can return 0×0, 1×1, or any intermediate transient size.
+    // Calling fit with a wrong size resizes the xterm buffer and
+    // can drop the content we just wrote. The ResizeObserver
+    // (which per spec always fires at least once when observation
+    // starts on a non-zero-sized element) handles the real fit,
+    // and the 50 ms timeout is a belt-and-suspenders fallback.
+    term.open(containerRef.current);
+    termRef.current = term;
+    fitRef.current = fit;
+
     const ro = new ResizeObserver(() => {
       try {
-        fit.fit();
-        resize(sessionId, term.cols, term.rows);
+        // Terminals on hidden worktrees have zero-size containers
+        // (display: none). Skipping fit for those prevents the
+        // buffer from being squashed to 0×0. The ResizeObserver
+        // fires again when the container becomes visible and the
+        // size is real.
+        const el = containerRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          fit.fit();
+          resize(sessionId, term.cols, term.rows);
+        }
       } catch {
         // ignore
       }
@@ -604,14 +692,18 @@ function TerminalSessionView({ sessionId }: { sessionId: number }) {
       ro.disconnect();
       dataDisp.dispose();
       unsubscribe();
-      // Snapshot the visual state for the next mount BEFORE we
-      // dispose the xterm. If the session was already torn down
-      // (closePane / clear) `setSerializedState` is a no-op.
-      try {
-        const state = serializeAddon.serialize();
-        setSerializedState(sessionId, state);
-      } catch (e) {
-        console.warn("xterm serialize failed", e);
+      // Only snapshot if the xterm actually has visible content.
+      // Skipping the empty case is what keeps React 19 strict mode
+      // from clobbering a previously-saved scrollback with a
+      // freshly-created empty xterm's state. `setSerializedState`
+      // is a no-op if the session was already torn down.
+      if (hasContentRef.current) {
+        try {
+          const state = serializeAddon.serialize();
+          setSerializedState(sessionId, state);
+        } catch (e) {
+          console.warn("xterm serialize failed", e);
+        }
       }
       term.dispose();
       termRef.current = null;

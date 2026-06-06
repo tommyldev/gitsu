@@ -174,8 +174,18 @@ export default function App() {
       const mod = e.metaKey || e.ctrlKey;
       // Don't steal the user's shortcuts while they're typing.
       const target = e.target as HTMLElement | null;
+      // xterm.js focuses a hidden <textarea class="xterm-helper-textarea">
+      // to capture keystrokes. It's a TEXTAREA element, so a naive
+      // tag check would treat it as editable and block every global
+      // hotkey (⌘1..9, ⌘[, ⌘], …) the moment the user clicks into
+      // a terminal. The helper textarea lives inside the `.xterm`
+      // container; either check excludes it.
+      const inXterm =
+        !!target?.classList.contains("xterm-helper-textarea") ||
+        !!target?.closest(".xterm");
       const inEditable =
         target &&
+        !inXterm &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
           target.isContentEditable);

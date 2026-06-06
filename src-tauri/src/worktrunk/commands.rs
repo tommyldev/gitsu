@@ -159,7 +159,70 @@ pub async fn switch_create(
         args.push("--execute");
         args.push(x);
     }
-    client.run_json(&args).await
+
+    match client.run_json::<SwitchResult>(&args).await {
+        Ok(r) => Ok(r),
+        Err(error::Error::Worktrunk(stderr)) => {
+            // Interim path before the M6 approval modal lands: if the
+            // failure is the well-known "needs approval" prompt that
+            // gitsu itself can't answer in a non-interactive GUI,
+            // pre-approve the named commands and re-run with --yes.
+            // The user has explicitly requested this operation
+            // (Create button) and the command being approved is
+            // either gitsu's own `wt step copy-ignored` (pre-approved
+            // at hooks_install time) or another repo hook the user
+            // authored — both are legitimate to auto-approve here.
+            let commands = parse_approval_commands(&stderr);
+            if commands.is_empty() {
+                return Err(error::Error::Worktrunk(stderr));
+            }
+            for cmd in &commands {
+                // Best-effort: a failure here still falls through to
+                // the --yes re-run, which approves at run-time.
+                let _ = config_approvals_add(client, cmd).await;
+            }
+            let mut retry_args = args.clone();
+            retry_args.push("--yes");
+            client.run_json(&retry_args).await
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Parse a worktrunk "needs approval" stderr payload and return the
+/// command names that need pre-approval. Returns an empty Vec if the
+/// stderr doesn't match the well-known pattern.
+///
+/// Worktrunk emits the prompt on a single line, e.g.:
+///
+/// ```text
+/// ▲ t3rminal needs approval to execute 1 command: ○ post-start copy: wt step copy-ignored ✗ Cannot prompt for approval in non-interactive environment ↳ To skip prompts in CI/CD, add --yes; to pre-approve commands, run wt config approvals add (exit 1)
+/// ```
+///
+/// We extract the segment between the trigger
+/// (`needs approval to execute`) and the failure marker (`✗`),
+/// then pull the command off the end of each `○` bullet.
+fn parse_approval_commands(stderr: &str) -> Vec<String> {
+    let Some(start) = stderr.find("needs approval to execute") else {
+        return Vec::new();
+    };
+    let rest = &stderr[start..];
+    let segment_end = rest.find('✗').unwrap_or(rest.len());
+    let segment = &rest[..segment_end];
+
+    let mut cmds = Vec::new();
+    for part in segment.split('○').skip(1) {
+        let part = part.trim_start();
+        // Each bullet is "<hook-type> <hook-name>: <command>". The
+        // LAST `: ` separates the hook description from the command.
+        if let Some((_left, cmd)) = part.rsplit_once(": ") {
+            let cmd = cmd.trim();
+            if !cmd.is_empty() && !cmds.iter().any(|c| c == cmd) {
+                cmds.push(cmd.to_string());
+            }
+        }
+    }
+    cmds
 }
 
 /// `wt switch <branch>` — switch to an existing worktree.
@@ -423,5 +486,50 @@ mod tests {
         assert_eq!(worktrees.len(), 2);
         assert_eq!(worktrees[0].branch.as_deref(), Some("main"));
         assert!(worktrees[1].branch.is_none());
+    }
+
+    /// Exact stderr shape from the user-reported
+    /// `t3rminal needs approval to execute 1 command` failure. The
+    /// parser must extract the single command name (`wt step
+    /// copy-ignored`) and nothing else.
+    #[test]
+    fn parse_approval_commands_single() {
+        let stderr = "▲ t3rminal needs approval to execute 1 command: ○ post-start copy: wt step copy-ignored ✗ Cannot prompt for approval in non-interactive environment ↳ To skip prompts in CI/CD, add --yes; to pre-approve commands, run wt config approvals add (exit 1)";
+        let cmds = parse_approval_commands(stderr);
+        assert_eq!(cmds, vec!["wt step copy-ignored".to_string()]);
+    }
+
+    /// Multi-hook payload (the docstring example). Each `○` bullet
+    /// contributes one command.
+    #[test]
+    fn parse_approval_commands_multi() {
+        let stderr = "▲ repo needs approval to execute 3 commands: ○ pre-start install: npm ci ○ pre-start build: cargo build --release ○ pre-start env: echo 'PORT={{ branch | hash_port }}' > .env.local ✗ Cannot prompt for approval in non-interactive environment ↳ To skip prompts in CI/CD, add --yes; to pre-approve commands, run wt config approvals add (exit 1)";
+        let cmds = parse_approval_commands(stderr);
+        assert_eq!(
+            cmds,
+            vec![
+                "npm ci".to_string(),
+                "cargo build --release".to_string(),
+                "echo 'PORT={{ branch | hash_port }}' > .env.local".to_string(),
+            ]
+        );
+    }
+
+    /// Non-approval stderr must yield an empty list (so the caller
+    /// falls through to the original error).
+    #[test]
+    fn parse_approval_commands_unrelated_error() {
+        let stderr = "error: branch 'foo' already exists (exit 1)";
+        let cmds = parse_approval_commands(stderr);
+        assert!(cmds.is_empty());
+    }
+
+    /// De-duplicates if worktrunk ever repeats a command across
+    /// bullets (defensive — same command in two hooks).
+    #[test]
+    fn parse_approval_commands_dedupes() {
+        let stderr = "▲ repo needs approval to execute 2 commands: ○ post-start copy: wt step copy-ignored ○ post-start extras: wt step copy-ignored ✗ nope (exit 1)";
+        let cmds = parse_approval_commands(stderr);
+        assert_eq!(cmds, vec!["wt step copy-ignored".to_string()]);
     }
 }

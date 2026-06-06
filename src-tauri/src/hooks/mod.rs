@@ -82,11 +82,23 @@ pub fn snapshot(repo: &Path) -> Result<HookConfigSnapshot> {
     })
 }
 
+/// Result of [`install`]. Carries the snapshot the caller returns
+/// to the UI plus a flag telling the caller whether the hook block
+/// was newly written (vs. already present). The IPC layer uses that
+/// flag to decide whether to pre-approve the command via
+/// `wt config approvals add` — we only do that when the user just
+/// consented to installing it, never when it was already there.
+pub struct InstallResult {
+    pub snapshot: HookConfigSnapshot,
+    /// `true` if the post-start block was written by this call.
+    pub newly_installed: bool,
+}
+
 /// Install gitsu's recommended post-start hook. Idempotent: if the
 /// hook is already installed, returns the existing snapshot. If the
 /// config file exists but the hook is missing, appends the section.
 /// If it doesn't exist, creates a fresh file.
-pub fn install(repo: &Path, with_worktreeinclude: bool) -> Result<HookConfigSnapshot> {
+pub fn install(repo: &Path, with_worktreeinclude: bool) -> Result<InstallResult> {
     let config_path = repo.join(".config").join("wt.toml");
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
@@ -129,7 +141,10 @@ pub fn install(repo: &Path, with_worktreeinclude: bool) -> Result<HookConfigSnap
         }
     }
 
-    snapshot(repo)
+    Ok(InstallResult {
+        snapshot: snapshot(repo)?,
+        newly_installed: needs_append,
+    })
 }
 
 /// Remove gitsu's post-start hook from `.config/wt.toml`. If the file
