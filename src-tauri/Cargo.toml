@@ -49,6 +49,10 @@ portable-pty = "0.8"
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
+# Filesystem walking + URL decoding for the directory explorer
+walkdir = "2"
+urlencoding = "2"
+
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!
 custom-protocol = ["tauri/custom-protocol"]

@@ -63,12 +63,14 @@ import { useHooksStore } from "@/stores/hooks";
 import { useTerminalStore } from "@/stores/terminal";
 import { useMergeStore } from "@/stores/merge";
 import { usePrefsStore } from "@/stores/prefs";
+import { useDirectoryStore } from "@/stores/directory";
 import { WorktreeList } from "@/components/worktree/WorktreeList";
 import { CreateWorktreeDialog } from "@/components/worktree/CreateWorktreeDialog";
 import { RemoveWorktreeDialog } from "@/components/worktree/RemoveWorktreeDialog";
 import { CommitGraph } from "@/components/graph/CommitGraph";
 import { CommitPanel } from "@/components/commit/CommitPanel";
 import { TerminalStrip } from "@/components/terminal/TerminalStrip";
+import { DirectoryExplorer } from "@/components/directory/DirectoryExplorer";
 import { HookSetupPrompt } from "@/components/hooks/HookSetupPrompt";
 import { HooksManager } from "@/components/hooks/HooksManager";
 import { MergeDialog } from "@/components/merge/MergeDialog";
@@ -122,6 +124,7 @@ export default function App() {
   const hooksFetch = useHooksStore((s) => s.fetch);
   const hooksClear = useHooksStore((s) => s.clear);
   const terminalClear = useTerminalStore((s) => s.clear);
+  const directoryClear = useDirectoryStore((s) => s.clear);
   const mergeOpen = useMergeStore((s) => s.open);
   const mergeClose = useMergeStore((s) => s.close);
   const mergePhase = useMergeStore((s) => s.phase);
@@ -162,11 +165,12 @@ export default function App() {
       graphClear();
       hooksClear();
       void terminalClear();
+      directoryClear();
       return;
     }
     graphFetch(repo.path);
     hooksFetch(repo.path);
-  }, [repo, graphFetch, graphClear, hooksFetch, hooksClear, terminalClear]);
+  }, [repo, graphFetch, graphClear, hooksFetch, hooksClear, terminalClear, directoryClear]);
 
   // ── Global hotkeys ───────────────────────────────────────────
   useEffect(() => {
@@ -635,7 +639,24 @@ export default function App() {
             )}
 
             {hideGraphPanel ? (
-              <TerminalStrip fillsAvailable />
+              <>
+                <TerminalStrip fillsAvailable />
+                {/* Right pane: directory explorer. In terminal view
+                    the commit panel is replaced by a file tree
+                    rooted at the focused terminal's CWD. The
+                    explorer is always visible — ⌘⌥B is not
+                    relevant here since the two sidebars serve
+                    different "modes" (graph vs terminal). */}
+                <ResizablePane
+                  width={rightWidth}
+                  min={RIGHT_PANE_MIN}
+                  max={RIGHT_PANE_MAX}
+                  onResize={setRightWidth}
+                  side="left"
+                >
+                  <DirectoryExplorer />
+                </ResizablePane>
+              </>
             ) : (
               <>
                 <div className="flex-1 overflow-hidden bg-bg">
@@ -865,7 +886,15 @@ function Header({
             </Button>
             <Button
               onClick={onToggleRight}
-              title={rightHidden ? "Show commit panel (⌘⌥B)" : "Hide commit panel (⌘⌥B)"}
+              title={
+                viewHidden
+                  ? rightHidden
+                    ? "Show file explorer (⌘⌥B)"
+                    : "Hide file explorer (⌘⌥B)"
+                  : rightHidden
+                    ? "Show commit panel (⌘⌥B)"
+                    : "Hide commit panel (⌘⌥B)"
+              }
               aria-pressed={rightHidden}
             >
               {rightHidden ? <PanelRightOpen size={14} strokeWidth={1.5} /> : <PanelRightClose size={14} strokeWidth={1.5} />}
@@ -999,5 +1028,6 @@ function secondsAgo(ts: number): string {
 import type { Layout } from "@/stores/terminal";
 function firstLeafId(layout: Layout): string | undefined {
   if (layout.kind === "pane") return layout.id;
+  if (layout.kind === "filepane") return layout.id;
   return firstLeafId(layout.a) ?? firstLeafId(layout.b);
 }

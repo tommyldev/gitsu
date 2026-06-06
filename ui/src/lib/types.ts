@@ -205,6 +205,25 @@ export interface PtyInfo {
   pid: number | null;
 }
 
+/** Emitted on `pty:cwd:<id>` when the shell's CWD changes (OSC 7). */
+export interface PtyCwdEvent {
+  id: number;
+  cwd: string;
+}
+
+// ── M2.1: directory explorer ───────────────────────────────
+
+/** One entry in a directory listing. Mirrors the Rust `DirEntry`
+ * struct returned by the `list_directory` IPC command. */
+export interface DirEntry {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  /** File size in bytes. `null` for directories (and for files we
+   * couldn't stat). */
+  size: number | null;
+}
+
 // ── M7: merge ────────────────────────────────────────────────
 
 export interface MergePreview {
