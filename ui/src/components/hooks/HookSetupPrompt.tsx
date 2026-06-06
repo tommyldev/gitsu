@@ -11,6 +11,7 @@
 
 import { useRepoStore } from "@/stores/repo";
 import { useHooksStore } from "@/stores/hooks";
+import { Button } from "@/components/ui/primitives";
 import { Package, X } from "lucide-react";
 
 export function HookSetupPrompt() {
@@ -27,8 +28,8 @@ export function HookSetupPrompt() {
   if (snapshot.has_post_start_copy_ignored) return null;
 
   return (
-    <div className="flex items-start gap-3 border-b border-white/[0.06] bg-bg-panel px-4 py-3 text-[13px] shadow-[0_2px_8px_rgba(0,0,0,0.1)]">
-      <Package size={18} className="mt-0.5 shrink-0 text-accent" strokeWidth={1.5} />
+    <div className="banner-seal mx-3 mt-3">
+      <Package size={18} className="mt-0.5 shrink-0 text-seal" strokeWidth={1.5} />
       <div className="flex-1">
         <p className="font-medium text-fg">
           Bring over <code className="font-mono">.env</code> &amp; build caches into new worktrees?
@@ -40,19 +41,20 @@ export function HookSetupPrompt() {
           only in the main worktree.
         </p>
         <div className="mt-2 flex items-center gap-2">
-          <button
+          <Button
+            variant="primary"
             onClick={() => install(repo.path, true)}
             disabled={loading}
-            className="rounded-md bg-accent px-3 py-1 text-[11px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-colors duration-150"
+            style={{ fontSize: 12, padding: "5px 11px" }}
           >
             {loading ? "Installing…" : "Install recommended setup"}
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={dismiss}
-            className="rounded-md px-2 py-1 text-[11px] text-fg-muted hover:bg-white/[0.04] transition-colors duration-150"
+            style={{ fontSize: 12, padding: "5px 9px" }}
           >
             Not now
-          </button>
+          </Button>
         </div>
       </div>
       <button

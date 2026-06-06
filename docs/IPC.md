@@ -236,12 +236,24 @@ local operations that don't need network credentials.
 the call never blocks waiting for a password; the GUI button click
 is the user's intent signal.
 
+**No-upstream fallback.** When HEAD's local branch has no tracking
+branch (the common case right after `wt switch --create` or after
+the in-graph "Branch" button creates a fresh local branch), `git
+pull` would error out with the confusing "There is no tracking
+information" message. The backend detects this with libgit2 and
+silently falls back to `git fetch --all --prune`, returning
+`fetch_only: true`. The GUI surfaces this as an *info* banner
+("No upstream — fetched remotes only. Use Push to publish") instead
+of an error.
+
 ```ts
 interface RemoteOpResult {
-  op: string;       // "pull"
+  op: string;            // always "pull" — `fetch_only` is the authoritative signal
   exit_code: number;
   stdout: string;
   stderr: string;
+  /** True when the backend fell back to `git fetch` due to no upstream. */
+  fetch_only: boolean;
 }
 ```
 

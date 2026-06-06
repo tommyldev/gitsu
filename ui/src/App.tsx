@@ -80,7 +80,6 @@ import { Button, Pill } from "@/components/ui/primitives";
 import {
   GitBranch,
   FolderOpen,
-  GitFork,
   AlertTriangle,
   Plus,
   X,
@@ -91,6 +90,7 @@ import {
   PanelLeftOpen,
   Command,
 } from "lucide-react";
+import { BrandMark, HankoSeal } from "@/components/ui/BrandMark";
 import type { Worktree } from "@/lib/types";
 import { sortWorktrees } from "@/lib/worktree";
 
@@ -530,7 +530,40 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col app-shell">
+      {/* Drifting silver aurora behind the app (z:0).
+          Three radial-gradient blooms drift slowly with
+          mix-blend-mode: screen. Respects prefers-reduced-motion. */}
+      <div className="aurora" aria-hidden="true">
+        <div className="bloom" />
+      </div>
+
+      {/* Zen watermark: ensō brush ring + giant 柔 kanji.
+          Sits between the aurora and the panels. */}
+      <div className="zen" aria-hidden="true">
+        <svg
+          className="enso"
+          viewBox="0 0 100 100"
+          fill="none"
+        >
+          <path
+            d="M 64 9 A 44 44 0 1 1 40 11"
+            stroke="white"
+            strokeWidth="4.5"
+            strokeLinecap="round"
+          />
+          <path
+            d="M 64 9 A 44 44 0 1 1 40 11"
+            stroke="white"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            opacity="0.5"
+            transform="translate(0.6 0.4)"
+          />
+        </svg>
+        <div className="kanji-mark">柔</div>
+      </div>
+
       <Header
         repo={repo}
         version={version}
@@ -554,12 +587,16 @@ export default function App() {
       />
 
       {error && (
-        <div className="flex items-start justify-between gap-2 border-b border-white/[0.06] bg-danger/10 px-4 py-2 text-[13px] text-danger shadow-[0_2px_8px_rgba(239,83,80,0.08)]">
-          <span className="flex items-center gap-2">
+        <div className="mx-3 mt-3 banner">
+          <span className="flex flex-1 items-center gap-2 text-danger">
             <AlertTriangle size={14} strokeWidth={1.5} />
             {error}
           </span>
-          <button onClick={clearError} className="rounded p-0.5 hover:bg-white/[0.04] transition-colors duration-150">
+          <button
+            onClick={clearError}
+            className="rounded p-0.5 text-danger/80 hover:bg-white/[0.04] transition-colors duration-150"
+            title="Dismiss"
+          >
             <X size={14} strokeWidth={1.5} />
           </button>
         </div>
@@ -783,8 +820,9 @@ function Header({
 
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
-          <GitFork size={18} className="text-accent" strokeWidth={1.5} />
+          <BrandMark />
           <span className="text-[15px] font-semibold tracking-tight text-fg">gitsu</span>
+          <HankoSeal />
         </div>
         {repo ? (
           <>

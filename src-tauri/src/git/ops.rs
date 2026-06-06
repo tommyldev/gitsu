@@ -40,6 +40,14 @@ pub struct RemoteOpResult {
     /// stderr from `git`. Contains the "Everything up-to-date",
     /// "To <remote>" / "From <remote>" lines, and any errors.
     pub stderr: String,
+    /// True when the request was *not* satisfied as literally
+    /// requested. v1 sets this only for `git_pull` on a branch with
+    /// no upstream — we transparently fall back to `git fetch` so
+    /// the button still does something useful, and the UI uses this
+    /// flag to surface "no upstream — fetched only, push to publish".
+    /// Always `false` for push.
+    #[serde(default)]
+    pub fetch_only: bool,
 }
 
 /// `git pull` in `worktree`. Streams nothing — we await completion and
@@ -50,7 +58,36 @@ pub struct RemoteOpResult {
 /// agents, GitHub CLI credentials, macOS keychain helpers, etc. all
 /// just work. The spawn is non-interactive (no TTY), which matches
 /// worktrunk's pattern.
+///
+/// **No-upstream handling.** A freshly created local branch (e.g. one
+/// from `wt switch --create` or from the new "Branch" button) has no
+/// tracking branch, and `git pull` errors out with the confusing
+/// "There is no tracking information" message. In that case we fall
+/// back to `git fetch --all --prune` — which *always* works — and
+/// set `fetch_only = true` on the result. The frontend uses that flag
+/// to show "fetched only; use Push to publish this branch". The
+/// fallback is intentional: clicking Pull on a fresh branch should
+/// still give the user *something* (up-to-date remote refs) rather
+/// than a raw git error.
 pub async fn pull(worktree: &Path) -> Result<RemoteOpResult> {
+    // Cheap pre-check: does HEAD have an upstream? If not, fall back
+    // to fetch so the user gets a useful result instead of a raw
+    // git error. The check is a single libgit2 call (< 5ms in
+    // practice) — well worth it to avoid a confusing error toast.
+    if !has_upstream_for_head(worktree).await? {
+        let mut result = run_git_remote(
+            worktree,
+            "fetch",
+            &["--all", "--prune"],
+        )
+        .await?;
+        // Override the op label so the UI knows the user asked for
+        // pull but got a fetch. The `fetch_only` flag is the
+        // authoritative signal; the op label is for banner copy.
+        result.op = "pull".to_string();
+        result.fetch_only = true;
+        return Ok(result);
+    }
     run_git_remote(worktree, "pull", &[]).await
 }
 
@@ -123,6 +160,7 @@ async fn run_git_remote_str(
         exit_code: output.status.code().unwrap_or(-1),
         stdout: String::from_utf8_lossy(&output.stdout).trim_end().to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).trim_end().to_string(),
+        fetch_only: false,
     })
 }
 
@@ -345,6 +383,50 @@ fn signature_from_config(r: &Repository) -> Option<Signature<'_>> {
     Signature::now(&name, &email).ok()
 }
 
+/// True when HEAD's local branch has a configured upstream
+/// (tracking) branch. Returns `false` for detached HEAD, for
+/// unborn repos, and for local branches with no upstream — the
+/// three cases where `git pull` would error out with "no tracking
+/// information" or similar.
+///
+/// libgit2 is sync, so this function is `async` and runs the
+/// libgit2 call inside `spawn_blocking` (it completes in < 5ms
+/// in practice). The `Result` is plumbed through unchanged so the
+/// caller can surface libgit2 errors instead of silently returning
+/// `false`.
+async fn has_upstream_for_head(worktree: &Path) -> Result<bool> {
+    let wt = worktree.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<bool> {
+        let r = Repository::discover(&wt).map_err(Error::from)?;
+        let head = match r.head() {
+            Ok(h) => h,
+            // Unborn repo (no commits yet) — no upstream by definition.
+            Err(_) => return Ok(false),
+        };
+        if !head.is_branch() {
+            // Detached HEAD — git pull works against the current SHA,
+            // but there's no branch tracking to check. Be defensive
+            // and treat this as "no upstream" so the user gets a
+            // fetch (which is what they probably want anyway).
+            return Ok(false);
+        }
+        let branch = git2::Branch::wrap(head);
+        // `upstream()` returns Err(NotFound) when the branch has no
+        // tracking branch — that's the signal we care about. We
+        // collapse the `Ok` arm to a bool so the temporary `Branch`
+        // (which borrows from `r`) is dropped before the closure
+        // returns — otherwise the borrow checker complains.
+        let upstream_result = branch.upstream();
+        match upstream_result {
+            Ok(_) => Ok(true),
+            Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(false),
+            Err(e) => Err(Error::from(e)),
+        }
+    })
+    .await
+    .map_err(|e| Error::Internal(format!("upstream check task: {e}")))?
+}
+
 // ── Tests ────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -464,5 +546,97 @@ mod tests {
             msg.to_lowercase().contains("stash") || msg.to_lowercase().contains("not found"),
             "expected stash-related error, got: {msg}"
         );
+    }
+
+    /// No-upstream detection: a brand-new local branch with no
+    /// tracking branch must return `false` from `has_upstream_for_head`.
+    /// This is the precondition for the `pull()` fetch fallback.
+    #[test]
+    fn has_upstream_returns_false_for_fresh_local_branch() {
+        // Build a runtime so the `tokio::task::spawn_blocking` call
+        // inside `has_upstream_for_head` has a place to run.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let dir = fresh_dir("no-upstream");
+        let _r = init_repo_with_commit(&dir);
+        let res = rt.block_on(has_upstream_for_head(&dir)).unwrap();
+        assert!(!res, "fresh local branch must have no upstream");
+    }
+
+    /// Set up an upstream via libgit2 (the same on-disk format the
+    /// real GUI will encounter, since `git branch --set-upstream-to`
+    /// just writes the same config keys). We avoid shelling out
+    /// because the test environment may not have `git` on PATH
+    /// consistently.
+    #[test]
+    fn has_upstream_returns_true_after_set_upstream() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let dir = fresh_dir("upstream");
+        let r = init_repo_with_commit(&dir);
+
+        // Synthesize a fake "origin/main" ref pointing at HEAD, then
+        // configure the local branch to track it via the same
+        // config keys `git branch --set-upstream-to` writes.
+        let head_oid = r.head().unwrap().target().unwrap();
+        r.reference(
+            "refs/remotes/origin/main",
+            head_oid,
+            true,
+            "test: seed origin/main",
+        )
+        .unwrap();
+        r.config()
+            .unwrap()
+            .set_str("branch.main.remote", "origin")
+            .unwrap();
+        r.config()
+            .unwrap()
+            .set_str("branch.main.merge", "refs/heads/main")
+            .unwrap();
+        // libgit2's `Branch::upstream()` validates that the remote
+        // named in `branch.<name>.remote` exists in the config's
+        // `[remote]` section. The URL doesn't need to be reachable
+        // (we never fetch from it in this test) but the section
+        // must be present or libgit2 returns Config/NotFound.
+        r.config()
+            .unwrap()
+            .set_str("remote.origin.url", "https://example.invalid/repo.git")
+            .unwrap();
+        r.config()
+            .unwrap()
+            .set_str("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+            .unwrap();
+
+        // Debug: inspect the upstream() result directly so a failure
+        // pinpoints whether the issue is config or ref resolution.
+        // (No-op in successful runs; the assertion below is the
+        // real test.)
+        let head = r.head().unwrap();
+        let branch = git2::Branch::wrap(head);
+        let _ = branch.upstream();
+
+        let res = rt.block_on(has_upstream_for_head(&dir)).unwrap();
+        assert!(res, "branch with upstream configured must report true");
+    }
+
+    /// Unborn repo (no commits) — should be `false` rather than an
+    /// error, so the GUI's Pull button degrades to fetch instead of
+    /// crashing the dialog on first launch.
+    #[test]
+    fn has_upstream_returns_false_for_unborn_repo() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let dir = fresh_dir("unborn");
+        // `init` (no commit) leaves HEAD unborn.
+        let _r = Repository::init(&dir).unwrap();
+        let res = rt.block_on(has_upstream_for_head(&dir)).unwrap();
+        assert!(!res, "unborn repo must report no upstream");
     }
 }

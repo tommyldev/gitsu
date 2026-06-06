@@ -242,6 +242,14 @@ export interface RemoteOpResult {
   exit_code: number;
   stdout: string;
   stderr: string;
+  /**
+   * True when the request was *not* satisfied as literally
+   * requested. v1 sets this only for `git_pull` on a branch with
+   * no upstream — the backend transparently falls back to
+   * `git fetch` and the UI shows a "no upstream — fetched only,
+   * use Push to publish" message.
+   */
+  fetch_only: boolean;
 }
 
 /** Result of `git_branch_create` — a new local branch at HEAD. */

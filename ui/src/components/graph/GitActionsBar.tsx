@@ -105,6 +105,16 @@ export function GitActionsBar() {
         const result = await invoke<RemoteOpResult>(cmd, { worktree: activePath, ...args });
         await refreshAll();
         if (result.exit_code === 0) {
+          if (result.fetch_only) {
+            // Backend fell back to fetch because the branch has no
+            // upstream. Don't surface a scary git error — explain
+            // the fallback and point the user to Push.
+            flash(
+              "info",
+              "No upstream for this branch — fetched remotes only. Use Push to publish.",
+            );
+            return;
+          }
           // The terse "Everything up-to-date" / "To origin" lines
           // are the most useful — the frontend shows them so the
           // user has a clear "this actually did something" signal.
