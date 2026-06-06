@@ -141,7 +141,12 @@ pub struct SwitchCreateOpts<'a> {
 pub struct SwitchResult {
     pub branch: String,
     pub path: PathBuf,
+    /// `wt switch --create` doesn't currently emit this; default to `false`
+    /// (the operation is a create-by-construction in gitsu's flow).
+    #[serde(default)]
     pub created: bool,
+    /// `wt` may not emit this either; tolerate missing/empty.
+    #[serde(default)]
     pub hooks_run: Vec<String>,
 }
 

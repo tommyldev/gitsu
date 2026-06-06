@@ -125,6 +125,11 @@ pub fn run() {
             // ── approvals (M6) ──────────────────────────────────────────
             ipc::wt_approve_command,
             ipc::wt_clear_approvals,
+            // ── directory explorer (M2.1) ──────────────────────────────
+            ipc::list_directory,
+            ipc::search_files,
+            ipc::read_file,
+            ipc::pty_cwd,
             // ── graph-view action bar (pull / push / branch / stash / pop)
             ipc::git_pull,
             ipc::git_push,
