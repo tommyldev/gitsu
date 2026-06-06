@@ -10,9 +10,10 @@
 
 import { useState } from "react";
 import { Button, Pill } from "@/components/ui/primitives";
-import { invoke } from "@/lib/tauri";
+import { wtRemove } from "@/lib/tauri";
 import { useRepoStore } from "@/stores/repo";
-import { WtRpcError, type IpcError, type RemoveResult, type Worktree } from "@/lib/types";
+import { type RemoveResult, type Worktree } from "@/lib/types";
+import { parseError } from "@/lib/errors";
 import { AlertTriangle, Trash2, X } from "lucide-react";
 
 interface Props {
@@ -52,12 +53,7 @@ export function RemoveWorktreeDialog({ worktree, onClose, onRemoved }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const result = await invoke<RemoveResult>("wt_remove", {
-        repo: repo.path,
-        branch: worktree.branch,
-        deleteBranch,
-        force,
-      });
+      const result = await wtRemove(repo.path, worktree.branch, deleteBranch, force);
       onRemoved?.(result);
       await refresh();
       onClose();
@@ -174,13 +170,4 @@ export function RemoveWorktreeDialog({ worktree, onClose, onRemoved }: Props) {
       </form>
     </div>
   );
-}
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
 }

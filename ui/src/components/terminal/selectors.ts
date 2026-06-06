@@ -27,9 +27,9 @@ function useRepoWorktrees(): Worktree[] {
       return;
     }
     let cancelled = false;
-    void import("@/lib/tauri").then(async ({ invoke }) => {
+    void import("@/lib/tauri").then(async ({ wtList }) => {
       try {
-        const result = await invoke<{ items: Worktree[] }>("wt_list", { repo: repo.path });
+        const result = await wtList(repo.path);
         if (!cancelled) setList(result.items);
       } catch {
         if (!cancelled) setList([]);

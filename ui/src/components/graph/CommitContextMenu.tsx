@@ -11,10 +11,10 @@
 
 import { useEffect, useRef } from "react";
 import { Copy, GitBranch, Hash, X, ArrowRightToLine } from "lucide-react";
-import { invoke } from "@/lib/tauri";
+import { wtSwitchCreate, wtSwitch } from "@/lib/tauri";
 import { useRepoStore } from "@/stores/repo";
-import { WtRpcError, type IpcError, type SwitchResult } from "@/lib/types";
-import type { BranchRef } from "@/lib/types";
+import { type BranchRef } from "@/lib/types";
+import { parseError } from "@/lib/errors";
 
 export interface CommitMenuTarget {
   sha: string;
@@ -66,11 +66,7 @@ export function CommitContextMenu({ target, onClose }: { target: CommitMenuTarge
       .slice(0, 50) || "branch";
     const branch = `${slug}-${target.shortSha}`;
     try {
-      await invoke<SwitchResult>("wt_switch_create", {
-        repo: repo.path,
-        branch,
-        base: target.sha,
-      });
+      await wtSwitchCreate(repo.path, branch, target.sha);
       await refresh();
     } catch (e) {
       alert(parseError(e));
@@ -85,10 +81,7 @@ export function CommitContextMenu({ target, onClose }: { target: CommitMenuTarge
   const checkoutBranch = async (branchName: string) => {
     if (!repo) return;
     try {
-      await invoke<SwitchResult>("wt_switch", {
-        repo: repo.path,
-        branch: branchName,
-      });
+      await wtSwitch(repo.path, branchName);
       await refresh();
     } catch (e) {
       alert(parseError(e));
@@ -220,13 +213,4 @@ function MenuItem({
       </button>
     </li>
   );
-}
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
 }

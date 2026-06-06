@@ -8,8 +8,9 @@
  */
 
 import { create } from "zustand";
-import { invoke } from "@/lib/tauri";
-import { WtRpcError, type CommitGraph, type IpcError } from "@/lib/types";
+import { graphBuild } from "@/lib/tauri";
+import { type CommitGraph } from "@/lib/types";
+import { parseError } from "@/lib/errors";
 import { layout, type GraphLayout } from "@/lib/dag";
 
 interface GraphState {
@@ -61,11 +62,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (get().fetchedFor === worktreePath && get().graph) return;
     set({ loading: true, error: null });
     try {
-      const graph = await invoke<CommitGraph>("graph_build", {
-        repo: worktreePath,
-        refName: null,
-        maxCount: MAX_COMMITS,
-      });
+      const graph = await graphBuild(worktreePath, null, MAX_COMMITS);
       const layoutResult = layout(graph);
       // Pre-select HEAD so the right pane has something to show.
       const selectedSha = graph.head_sha || graph.nodes[0]?.sha || null;
@@ -112,12 +109,3 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       fetchedFor: null,
     }),
 }));
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
-}

@@ -12,10 +12,11 @@
  */
 
 import { useState } from "react";
-import { invoke } from "@/lib/tauri";
+import { wtClearApprovals } from "@/lib/tauri";
 import { useRepoStore } from "@/stores/repo";
 import { usePrefsStore } from "@/stores/prefs";
-import { WtRpcError, type IpcError, type VersionInfo } from "@/lib/types";
+import { type VersionInfo } from "@/lib/types";
+import { parseError } from "@/lib/errors";
 import { Copy, ExternalLink, Eye, EyeOff, RotateCcw, Settings as SettingsIcon, Trash2, X } from "lucide-react";
 
 interface Props {
@@ -44,7 +45,7 @@ export function SettingsModal({ onClose }: Props) {
     setClearBusy(true);
     setClearResult(null);
     try {
-      await invoke<string>("wt_clear_approvals", { repo: repo.path });
+      await wtClearApprovals(repo.path);
       setClearResult("All hook approvals cleared. Worktrunk will re-prompt next time.");
     } catch (e) {
       setClearResult(parseError(e));
@@ -254,13 +255,4 @@ function WorktrunkInfo({ version }: { version: VersionInfo }) {
       )}
     </>
   );
-}
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
 }

@@ -18,170 +18,69 @@
  * guard).
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import clsx from "clsx";
 import { ArrowDownToLine, ArrowUpToLine, GitBranch, ArchiveRestore, Archive, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
-import { useRepoStore } from "@/stores/repo";
 import { useGraphStore } from "@/stores/graph";
-import { invoke } from "@/lib/tauri";
-import {
-  WtRpcError,
-  type BranchCreateResult,
-  type IpcError,
-  type RemoteOpResult,
-  type StashPopResult,
-  type StashPushResult,
-} from "@/lib/types";
+import { shortenPath } from "@/lib/format";
+import { gitPull, gitPush } from "@/lib/tauri";
+import { useGitActions } from "./useGitActions";
 import { CreateBranchDialog } from "@/components/graph/CreateBranchDialog";
 
-/** One of the five buttons. Used as a key for the per-op busy state. */
-type Op = "pull" | "push" | "branch" | "stash" | "pop";
-
-/** Severity of the last banner — drives colors + auto-dismiss timing. */
-type BannerKind = "success" | "error" | "info";
-
-interface Banner {
-  kind: BannerKind;
-  message: string;
+function BarButton({
+  icon,
+  label,
+  title,
+  loading,
+  disabled,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  title: string;
+  loading: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || loading}
+      title={title}
+      className={clsx(
+        "group inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition-all duration-150 ease-standard",
+        // Always visible: solid bg + readable text + a real border.
+        // The hover state nudges brightness/lift on top of that, so
+        // the button is never invisible by default. Matches the
+        // visible-at-rest standard set by the global `.btn-ghost`.
+        "border-white/[0.24] bg-white/[0.12] text-fg hover:border-white/[0.36] hover:bg-white/[0.2] hover:text-fg hover:shadow-[0_2px_8px_rgba(0,0,0,0.25)]",
+        "active:translate-y-px",
+        "disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:border-white/[0.24] disabled:hover:bg-white/[0.12] disabled:hover:text-fg disabled:hover:shadow-none",
+        loading && "border-accent/30 bg-accent/10 text-accent",
+      )}
+    >
+      {loading ? (
+        <Loader2 size={12} className="animate-spin" strokeWidth={1.5} />
+      ) : (
+        icon
+      )}
+      <span>{label}</span>
+    </button>
+  );
 }
 
-const SUCCESS_MS = 4000;
-const ERROR_MS = 8000;
+function Divider() {
+  return <span aria-hidden className="mx-1 h-4 w-px bg-white/[0.06]" />;
+}
 
 export function GitActionsBar() {
-  const repo = useRepoStore((s) => s.repo);
   const activePath = useGraphStore((s) => s.activePath);
-  const graphFetch = useGraphStore((s) => s.fetch);
-  const repoRefresh = useRepoStore((s) => s.refresh);
-  const [busy, setBusy] = useState<Op | null>(null);
-  const [banner, setBanner] = useState<Banner | null>(null);
   const [branchOpen, setBranchOpen] = useState(false);
-  const dismissTimer = useRef<number | null>(null);
+  const { handlers, busy, banner, dismissBanner } = useGitActions({
+    onCloseBranch: () => setBranchOpen(false),
+  });
 
-  const disabled = !repo || !activePath;
-
-  const flash = useCallback((kind: BannerKind, message: string) => {
-    setBanner({ kind, message });
-    if (dismissTimer.current !== null) {
-      window.clearTimeout(dismissTimer.current);
-    }
-    const ms = kind === "error" ? ERROR_MS : SUCCESS_MS;
-    dismissTimer.current = window.setTimeout(() => setBanner(null), ms);
-  }, []);
-
-  // Clear any pending banner when the active worktree changes —
-  // a stale "Pushed feature/foo" from a previous worktree is just
-  // visual noise in the new one.
-  useEffect(() => {
-    if (dismissTimer.current !== null) {
-      window.clearTimeout(dismissTimer.current);
-      dismissTimer.current = null;
-    }
-    setBanner(null);
-  }, [activePath]);
-
-  useEffect(() => {
-    return () => {
-      if (dismissTimer.current !== null) {
-        window.clearTimeout(dismissTimer.current);
-      }
-    };
-  }, []);
-
-  const refreshAll = useCallback(async () => {
-    if (!repo) return;
-    // Kick the worktree poll + graph fetch in parallel. The poll
-    // updates ahead/behind counts and dirty flags; the graph fetch
-    // updates the commit list and head SHA.
-    await Promise.all([repoRefresh(), activePath ? graphFetch(activePath) : Promise.resolve()]);
-  }, [activePath, graphFetch, repo, repoRefresh]);
-
-  const runRemote = useCallback(
-    async (op: Exclude<Op, "branch">, cmd: string, args: Record<string, unknown>) => {
-      if (!activePath) return;
-      setBusy(op);
-      setBanner(null);
-      try {
-        const result = await invoke<RemoteOpResult>(cmd, { worktree: activePath, ...args });
-        await refreshAll();
-        if (result.exit_code === 0) {
-          if (result.fetch_only) {
-            // Backend fell back to fetch because the branch has no
-            // upstream. Don't surface a scary git error — explain
-            // the fallback and point the user to Push.
-            flash(
-              "info",
-              "No upstream for this branch — fetched remotes only. Use Push to publish.",
-            );
-            return;
-          }
-          // The terse "Everything up-to-date" / "To origin" lines
-          // are the most useful — the frontend shows them so the
-          // user has a clear "this actually did something" signal.
-          const detail = pickInterestingLine(result.stderr || result.stdout);
-          flash("success", detail ?? `${labelFor(op)} ok`);
-        } else {
-          flash("error", result.stderr || `${labelFor(op)} failed (exit ${result.exit_code})`);
-        }
-      } catch (e) {
-        flash("error", parseError(e));
-      } finally {
-        setBusy(null);
-      }
-    },
-    [activePath, flash, refreshAll],
-  );
-
-  const onStash = useCallback(async () => {
-    if (!activePath) return;
-    setBusy("stash");
-    setBanner(null);
-    try {
-      const result = await invoke<StashPushResult>("git_stash_push", {
-        worktree: activePath,
-        message: null,
-      });
-      await refreshAll();
-      if (result.no_changes) {
-        flash("info", "Nothing to stash — working tree is clean.");
-      } else {
-        flash("success", `Stashed changes (${result.oid.slice(0, 7)}).`);
-      }
-    } catch (e) {
-      flash("error", parseError(e));
-    } finally {
-      setBusy(null);
-    }
-  }, [activePath, flash, refreshAll]);
-
-  const onPop = useCallback(async () => {
-    if (!activePath) return;
-    setBusy("pop");
-    setBanner(null);
-    try {
-      const result = await invoke<StashPopResult>("git_stash_pop", { worktree: activePath });
-      await refreshAll();
-      if (result.had_conflicts) {
-        flash("error", "Stash pop produced conflicts — resolve them in the commit panel.");
-      } else {
-        flash("success", `Restored stash (${result.oid.slice(0, 7)}).`);
-      }
-    } catch (e) {
-      flash("error", parseError(e));
-    } finally {
-      setBusy(null);
-    }
-  }, [activePath, flash, refreshAll]);
-
-  const onBranchCreated = useCallback(
-    async (result: BranchCreateResult) => {
-      setBranchOpen(false);
-      await refreshAll();
-      const suffix = result.already_checked_out ? " (already checked out)" : "";
-      flash("success", `Created branch ${result.name} at ${result.sha.slice(0, 7)}${suffix}`);
-    },
-    [flash, refreshAll],
-  );
+  const disabled = !activePath;
 
   return (
     <>
@@ -193,7 +92,7 @@ export function GitActionsBar() {
             title="git pull — fetch + merge from upstream"
             loading={busy === "pull"}
             disabled={disabled}
-            onClick={() => void runRemote("pull", "git_pull", {})}
+            onClick={() => void handlers.runRemote("pull", gitPull)}
           />
           <BarButton
             icon={<ArrowUpToLine size={13} strokeWidth={1.5} />}
@@ -201,7 +100,7 @@ export function GitActionsBar() {
             title="git push — publish to upstream"
             loading={busy === "push"}
             disabled={disabled}
-            onClick={() => void runRemote("push", "git_push", {})}
+            onClick={() => void handlers.runRemote("push", gitPush)}
           />
           <Divider />
           <BarButton
@@ -219,7 +118,7 @@ export function GitActionsBar() {
             title="git stash push -u — stash working tree changes"
             loading={busy === "stash"}
             disabled={disabled}
-            onClick={() => void onStash()}
+            onClick={() => void handlers.onStash()}
           />
           <BarButton
             icon={<ArchiveRestore size={13} strokeWidth={1.5} />}
@@ -227,7 +126,7 @@ export function GitActionsBar() {
             title="git stash pop — restore the top stash"
             loading={busy === "pop"}
             disabled={disabled}
-            onClick={() => void onPop()}
+            onClick={() => void handlers.onPop()}
           />
 
           {/* Right side: subtle hint about the active worktree. */}
@@ -269,7 +168,7 @@ export function GitActionsBar() {
               )}
               <span className="flex-1 font-mono leading-snug">{banner.message}</span>
               <button
-                onClick={() => setBanner(null)}
+                onClick={dismissBanner}
                 className="-my-1 -mr-1 rounded p-1 text-current opacity-60 hover:bg-white/[0.06] hover:opacity-100 transition-opacity duration-150"
                 title="Dismiss"
               >
@@ -284,97 +183,9 @@ export function GitActionsBar() {
         <CreateBranchDialog
           worktree={activePath}
           onClose={() => setBranchOpen(false)}
-          onCreated={onBranchCreated}
+          onCreated={handlers.onBranchCreated}
         />
       )}
     </>
   );
-}
-
-// ── Small button primitive (toolbar-specific) ────────────────────
-
-function BarButton({
-  icon,
-  label,
-  title,
-  loading,
-  disabled,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  title: string;
-  loading: boolean;
-  disabled: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled || loading}
-      title={title}
-      className={clsx(
-        "group inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition-all duration-150 ease-standard",
-        "border-white/[0.08] bg-white/[0.02] text-fg-muted hover:border-white/[0.14] hover:bg-white/[0.04] hover:text-fg",
-        "active:translate-y-px",
-        "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-white/[0.08] disabled:hover:bg-white/[0.02] disabled:hover:text-fg-muted",
-        loading && "border-accent/30 bg-accent/10 text-accent",
-      )}
-    >
-      {loading ? (
-        <Loader2 size={12} className="animate-spin" strokeWidth={1.5} />
-      ) : (
-        icon
-      )}
-      <span>{label}</span>
-    </button>
-  );
-}
-
-function Divider() {
-  return <span aria-hidden className="mx-1 h-4 w-px bg-white/[0.06]" />;
-}
-
-// ── Helpers ──────────────────────────────────────────────────────
-
-function labelFor(op: Op): string {
-  switch (op) {
-    case "pull":
-      return "Pull";
-    case "push":
-      return "Push";
-    case "branch":
-      return "Branch";
-    case "stash":
-      return "Stash";
-    case "pop":
-      return "Pop";
-  }
-}
-
-/** Pick a single line of stderr to surface in the success toast. Pull
- *  and push emit their interesting line on stderr (e.g. "Fast-forward
- *  to abc1234", "Everything up-to-date", "To github.com:foo/bar.git").
- *  We grab the first non-empty line so the user gets a useful
- *  signal. */
-function pickInterestingLine(text: string): string | null {
-  const line = text
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => l.length > 0);
-  return line ?? null;
-}
-
-function shortenPath(p: string): string {
-  if (p.length <= 48) return p;
-  return `…${p.slice(p.length - 47)}`;
-}
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
 }

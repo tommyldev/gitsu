@@ -8,13 +8,9 @@
  */
 
 import { create } from "zustand";
-import { invoke } from "@/lib/tauri";
-import {
-  WtRpcError,
-  type IpcError,
-  type MergePreview,
-  type MergeResult,
-} from "@/lib/types";
+import { mergePreview, wtMerge } from "@/lib/tauri";
+import { type MergePreview, type MergeResult } from "@/lib/types";
+import { parseError } from "@/lib/errors";
 
 export type MergePhase =
   | "idle"
@@ -86,11 +82,7 @@ export const useMergeStore = create<MergeState>((set, get) => ({
     if (!context) return;
     set({ phase: "previewing", error: null });
     try {
-      const preview = await invoke<MergePreview>("merge_preview", {
-        worktree: context.worktree,
-        sourceBranch: context.sourceBranch,
-        targetBranch: context.targetBranch,
-      });
+      const preview = await mergePreview(context.worktree, context.sourceBranch, context.targetBranch);
       set({ preview, phase: "ready" });
     } catch (e) {
       set({ phase: "error", error: parseError(e) });
@@ -102,11 +94,7 @@ export const useMergeStore = create<MergeState>((set, get) => ({
     if (!context || !preview) return;
     set({ phase: "running", error: null });
     try {
-      const result = await invoke<MergeResult>("wt_merge", {
-        repo: context.worktree,
-        target: context.targetBranch,
-        noHooks,
-      });
+      const result = await wtMerge(context.worktree, context.targetBranch, noHooks);
       // If `wt merge` returned conflicts (despite preview saying
       // clean, e.g. dirty workdir), jump to the resolving phase.
       const next = result.conflicts.length > 0 ? "resolving" : "done";
@@ -123,23 +111,10 @@ export const useMergeStore = create<MergeState>((set, get) => ({
     if (!context) return;
     set({ phase: "running", error: null });
     try {
-      const result = await invoke<MergeResult>("wt_merge", {
-        repo: context.worktree,
-        target: context.targetBranch,
-        noHooks: false,
-      });
+      const result = await wtMerge(context.worktree, context.targetBranch, false);
       set({ result, phase: "done" });
     } catch (e) {
       set({ phase: "error", error: parseError(e) });
     }
   },
 }));
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
-}

@@ -8,8 +8,9 @@
  */
 
 import { create } from "zustand";
-import { invoke } from "@/lib/tauri";
-import { WtRpcError, type IpcError, type RecentRepo, type VersionInfo, type WorktreeList } from "@/lib/types";
+import { recentRepos, openRepo, forgetRepo, wtVersion, wtList } from "@/lib/tauri";
+import { type RecentRepo, type VersionInfo, type WorktreeList } from "@/lib/types";
+import { parseError } from "@/lib/errors";
 
 interface RepoState {
   // Currently-open repo (null when on the home/recents screen)
@@ -57,7 +58,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
 
   refreshRecents: async () => {
     try {
-      const recents = await invoke<RecentRepo[]>("recent_repos");
+      const recents = await recentRepos();
       set({ recents });
     } catch (e) {
       // Non-fatal — recents are a nice-to-have on the home screen.
@@ -70,8 +71,8 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     if (!repo) return;
     try {
       const [worktrees, version] = await Promise.all([
-        invoke<WorktreeList>("wt_list", { repo: repo.path }),
-        invoke<VersionInfo>("wt_version", { repo: repo.path }),
+        wtList(repo.path),
+        wtVersion(repo.path),
       ]);
       set({ worktrees, version, loading: false, error: null, lastFetched: Date.now() });
     } catch (e) {
@@ -83,7 +84,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   openByPath: async (path) => {
     set({ loading: true, error: null });
     try {
-      const r = await invoke<RecentRepo>("open_repo", { path });
+      const r = await openRepo(path);
       set({ repo: r, worktrees: null });
       await get().refresh();
       await get().refreshRecents();
@@ -111,7 +112,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
 
   forget: async (path) => {
     try {
-      await invoke("forget_repo", { path });
+      await forgetRepo(path);
       await get().refreshRecents();
     } catch (e) {
       set({ error: parseError(e) });
@@ -135,14 +136,4 @@ export function stopPolling() {
     window.clearInterval(pollHandle);
     pollHandle = null;
   }
-}
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    const m = (e as IpcError).message;
-    if (m) return m;
-  }
-  if (typeof e === "string") return e;
-  return String(e);
 }

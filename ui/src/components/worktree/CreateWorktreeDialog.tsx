@@ -10,9 +10,10 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/primitives";
-import { invoke } from "@/lib/tauri";
+import { wtSwitchCreate } from "@/lib/tauri";
 import { useRepoStore } from "@/stores/repo";
-import { WtRpcError, type IpcError, type SwitchResult } from "@/lib/types";
+import { type SwitchResult } from "@/lib/types";
+import { parseError } from "@/lib/errors";
 import { GitBranch, Plus, X } from "lucide-react";
 
 interface Props {
@@ -36,12 +37,12 @@ export function CreateWorktreeDialog({ onClose, onCreated }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const result = await invoke<SwitchResult>("wt_switch_create", {
-        repo: repo.path,
-        branch: branch.trim(),
-        base: base.trim() || null,
-        execute: execute.trim() || null,
-      });
+      const result = await wtSwitchCreate(
+        repo.path,
+        branch.trim(),
+        base.trim() || null,
+        execute.trim() || null,
+      );
       onCreated?.(result);
       await refresh();
       onClose();
@@ -145,13 +146,4 @@ export function CreateWorktreeDialog({ onClose, onCreated }: Props) {
       `}</style>
     </div>
   );
-}
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
 }

@@ -28,7 +28,8 @@ either side of the bridge.**
    no args). gitsu has its own dashboard.
 3. **Respect the IPC contract.** Adding a Tauri command = adding a
    typed wrapper in `ui/src/lib/tauri.ts` + a domain type in
-   `ui/src/lib/types.ts` + a doc entry in `docs/IPC.md`.
+   the right `ui/src/lib/types/*` module (re-exported by the barrel) +
+   a doc entry in `docs/IPC.md`.
 4. **Version the worktrunk sidecar.** `scripts/download-wt.sh`
    pins `WT_VERSION`. Bump intentionally, not by accident.
 5. **Don't re-implement worktrunk in Rust.** The whole point of gitsu
@@ -36,6 +37,9 @@ either side of the bridge.**
    live in `wt`, propose it upstream.
 6. **Run `cargo check` + `npm run typecheck` before claiming work is
    done.** Both must be clean.
+7. **Follow `docs/CONVENTIONS.md`** for file structure, the ~200-line
+   file-size guidance, component conventions, and the Zustand +
+   Tauri/React patterns.
 
 ## Repo layout
 
@@ -57,15 +61,17 @@ src-tauri/                 Rust backend
 
 ui/                        React frontend
   src/
-    main.tsx               Tauri + theme bootstrap
-    App.tsx                routing: home ↔ dashboard
-    components/            one folder per feature area
-    stores/                Zustand stores
-    lib/                   types, Tauri wrappers, pure helpers
+    main.tsx               React + theme bootstrap
+    App.tsx                shell: routing (home ↔ dashboard) + composition
+    components/            one folder per feature area (+ layout/ = app shell)
+    hooks/                 cross-cutting hooks (global hotkeys, palette actions)
+    stores/                Zustand stores (terminal/ is sliced into pty+layout)
+    lib/                   typed Tauri wrappers, errors, format, diff,
+                           terminal-layout, dag, types/ (barrel)
     styles/                Tailwind + globals
 
 scripts/                   dev tooling (sidecar downloader, etc.)
-docs/                      ARCHITECTURE, IPC, WORKTRUNK_INTEGRATION
+docs/                      ARCHITECTURE, CONVENTIONS, IPC, WORKTRUNK_INTEGRATION
 ```
 
 ## Phased delivery (M0 → M9)

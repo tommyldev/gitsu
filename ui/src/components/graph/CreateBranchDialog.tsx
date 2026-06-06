@@ -16,8 +16,9 @@
 import { useEffect, useRef, useState } from "react";
 import { GitBranch, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/primitives";
-import { invoke } from "@/lib/tauri";
-import { WtRpcError, type BranchCreateResult, type IpcError } from "@/lib/types";
+import { gitBranchCreate } from "@/lib/tauri";
+import { type BranchCreateResult } from "@/lib/types";
+import { parseError } from "@/lib/errors";
 
 interface Props {
   worktree: string;
@@ -45,10 +46,7 @@ export function CreateBranchDialog({ worktree, onClose, onCreated }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const result = await invoke<BranchCreateResult>("git_branch_create", {
-        worktree,
-        name: trimmed,
-      });
+      const result = await gitBranchCreate(worktree, trimmed);
       onCreated(result);
     } catch (e) {
       setError(parseError(e));
@@ -122,13 +120,4 @@ export function CreateBranchDialog({ worktree, onClose, onCreated }: Props) {
       </form>
     </div>
   );
-}
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
 }

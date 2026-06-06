@@ -18,11 +18,14 @@
  * graph and the commit panel; the per-side flags are surgical
  * toggles for users who want graph-but-no-panel or panel-but-no-list.
  *
- * Persistence: localStorage under `gitsu:prefs:v1`. v1 lets us bump the
- * shape without nuking user prefs on future additions.
+ * Persistence: the `persist` middleware (zustand/middleware) under
+ * `gitsu:prefs:v1` in localStorage. `partialize` writes only the flags
+ * (never the actions); a legacy-aware storage adapter rewraps the flat
+ * blob older builds wrote so upgrades don't drop a user's prefs.
  */
 
 import { create } from "zustand";
+import { persist, createJSONStorage, type StateStorage } from "zustand/middleware";
 
 interface PrefsState {
   hideGraphPanel: boolean;
@@ -41,80 +44,61 @@ interface PrefsState {
 
 const STORAGE_KEY = "gitsu:prefs:v1";
 
-interface Persisted {
-  hideGraphPanel?: boolean;
-  hideWorktreeList?: boolean;
-  hideCommitPanel?: boolean;
-}
+/**
+ * Backward-compatible storage. Earlier builds wrote a flat
+ * `{ hideGraphPanel, … }` blob; `persist` expects a `{ state, version }`
+ * envelope. On read, rewrap the legacy shape so existing users keep
+ * their panel prefs across this upgrade. `window`-guarded for SSR /
+ * non-browser safety (mostly defensive — the app runs in a webview).
+ */
+const prefsStorage: StateStorage = {
+  getItem: (name) => {
+    if (typeof window === "undefined") return null;
+    const raw = window.localStorage.getItem(name);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === "object" && "state" in parsed) return raw;
+      return JSON.stringify({ state: parsed, version: 0 });
+    } catch {
+      return null;
+    }
+  },
+  setItem: (name, value) => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(name, value);
+  },
+  removeItem: (name) => {
+    if (typeof window === "undefined") return;
+    window.localStorage.removeItem(name);
+  },
+};
 
-function readInitial(): Persisted {
-  // SSR / non-browser safety — the app runs in a Tauri webview so this
-  // is mostly defensive.
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Persisted;
-    return {
-      hideGraphPanel: parsed.hideGraphPanel === true,
-      hideWorktreeList: parsed.hideWorktreeList === true,
-      hideCommitPanel: parsed.hideCommitPanel === true,
-    };
-  } catch (e) {
-    console.warn("prefs: failed to read localStorage", e);
-    return {};
-  }
-}
+export const usePrefsStore = create<PrefsState>()(
+  persist(
+    (set, get) => ({
+      hideGraphPanel: false,
+      hideWorktreeList: false,
+      hideCommitPanel: false,
 
-function persist(state: PrefsState) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        hideGraphPanel: state.hideGraphPanel,
-        hideWorktreeList: state.hideWorktreeList,
-        hideCommitPanel: state.hideCommitPanel,
+      setHideGraphPanel: (v) => set({ hideGraphPanel: v }),
+      toggleHideGraphPanel: () => set({ hideGraphPanel: !get().hideGraphPanel }),
+
+      setHideWorktreeList: (v) => set({ hideWorktreeList: v }),
+      toggleHideWorktreeList: () => set({ hideWorktreeList: !get().hideWorktreeList }),
+
+      setHideCommitPanel: (v) => set({ hideCommitPanel: v }),
+      toggleHideCommitPanel: () => set({ hideCommitPanel: !get().hideCommitPanel }),
+    }),
+    {
+      name: STORAGE_KEY,
+      storage: createJSONStorage(() => prefsStorage),
+      // Persist only the flags, never the action functions.
+      partialize: (s) => ({
+        hideGraphPanel: s.hideGraphPanel,
+        hideWorktreeList: s.hideWorktreeList,
+        hideCommitPanel: s.hideCommitPanel,
       }),
-    );
-  } catch (e) {
-    console.warn("prefs: failed to write localStorage", e);
-  }
-}
-
-export const usePrefsStore = create<PrefsState>((set, get) => ({
-  hideGraphPanel: false,
-  hideWorktreeList: false,
-  hideCommitPanel: false,
-  ...readInitial(),
-
-  setHideGraphPanel: (v) => {
-    set({ hideGraphPanel: v });
-    persist(get());
-  },
-
-  toggleHideGraphPanel: () => {
-    set({ hideGraphPanel: !get().hideGraphPanel });
-    persist(get());
-  },
-
-  setHideWorktreeList: (v) => {
-    set({ hideWorktreeList: v });
-    persist(get());
-  },
-
-  toggleHideWorktreeList: () => {
-    set({ hideWorktreeList: !get().hideWorktreeList });
-    persist(get());
-  },
-
-  setHideCommitPanel: (v) => {
-    set({ hideCommitPanel: v });
-    persist(get());
-  },
-
-  toggleHideCommitPanel: () => {
-    set({ hideCommitPanel: !get().hideCommitPanel });
-    persist(get());
-  },
-}));
+    },
+  ),
+);

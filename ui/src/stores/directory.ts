@@ -15,7 +15,7 @@
  */
 
 import { create } from "zustand";
-import { invoke } from "@/lib/tauri";
+import { listDirectory, searchFiles } from "@/lib/tauri";
 import type { DirEntry } from "@/lib/types";
 
 interface DirectoryState {
@@ -110,7 +110,7 @@ export const useDirectoryStore = create<DirectoryState>((set, get) => ({
       return { loading, error: null };
     });
     try {
-      const entries = await invoke<DirEntry[]>("list_directory", { path: dir });
+      const entries = await listDirectory(dir);
       set((s) => {
         const cache = new Map(s.cache);
         cache.set(dir, entries);
@@ -166,10 +166,7 @@ export const useDirectoryStore = create<DirectoryState>((set, get) => ({
     try {
       // The Rust command returns paths relative to root, using
       // forward slashes. We prefix with the root for display.
-      const rels = await invoke<string[]>("search_files", {
-        root,
-        pattern: q,
-      });
+      const rels = await searchFiles(root, q);
       const results = rels.map((r) => `${root}/${r}`);
       set({ searchResults: results, searching: false });
     } catch (e) {

@@ -18,7 +18,7 @@
 import { useEffect, useState } from "react";
 import { FileText, X } from "lucide-react";
 import clsx from "clsx";
-import { invoke } from "@/lib/tauri";
+import { readFile } from "@/lib/tauri";
 
 export interface FileViewerPaneProps {
   paneId: string;
@@ -54,7 +54,7 @@ export function FileViewerPane({
   useEffect(() => {
     let cancelled = false;
     setState({ kind: "loading" });
-    invoke<string | null>("read_file", { path: filePath })
+    readFile(filePath)
       .then((content) => {
         if (cancelled) return;
         if (content == null) {

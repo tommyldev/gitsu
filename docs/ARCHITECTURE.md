@@ -110,17 +110,30 @@ tree.
 ### React (`ui/src/`)
 
 - **`stores/`** — Zustand stores. `repo.ts` (current repo, worktrees,
-  recents, polling), `worktree.ts` (per-worktree detail), `graph.ts`
-  (DAG nodes, selection), `diff.ts` (selected file diff), `terminal.ts`
-  (PTY sessions), `hooks.ts` (hook defs + run history), `settings.ts`
-  (theme/layout).
-- **`components/`** — One folder per feature area: `layout/`,
-  `worktree/`, `graph/`, `commit/`, `terminal/`, `hooks/`, `merge/`,
-  `palette/`, `ui/`.
+  recents, polling), `graph.ts` (DAG nodes, selection), `hooks.ts`
+  (hook config), `merge.ts` (merge/conflict phase machine), `prefs.ts`
+  (panel toggles — persisted via `zustand/middleware`), `directory.ts`
+  (file-tree cache), and `terminal/` — the PTY store sliced into
+  `pty.ts` (session lifecycle) + `layout.ts` (split/pane tree) +
+  `types.ts`, composed in `index.ts`.
+- **`components/`** — One folder per feature area: `layout/` (app shell:
+  `Header`, `Home`, `Dashboard`, `ResizablePane`), `worktree/`, `graph/`,
+  `commit/`, `terminal/`, `directory/`, `hooks/`, `merge/`, `palette/`,
+  `settings/`, `ui/`. Feature-specific hooks are co-located in the
+  feature folder (e.g. `graph/useGitActions.ts`).
+- **`hooks/`** — Cross-cutting hooks not tied to one feature:
+  `useGlobalHotkeys.ts` (the app-wide keydown listener) and
+  `useTerminalActions.ts` (command-palette terminal helpers).
 - **`lib/`** — Pure helpers + typed Tauri command wrappers.
-  `dag.ts` (lane assignment), `diff.ts` (unified diff parser),
-  `shell.ts` (path/url helpers), `tauri.ts` (typed invoke), `types.ts`
-  (domain types matching Rust serde structs).
+  `errors.ts` (`parseError` + `WtRpcError`/`IpcError`), `format.ts`
+  (time/size/path formatters), `diff.ts` (unified-diff parser),
+  `terminal-layout.ts` (`Layout` type + pure tree ops), `dag.ts` (lane
+  assignment), `worktree.ts` (display/sort helpers), `tauri.ts` (one
+  typed async fn per IPC command), and `types/` (domain types split by
+  milestone behind a barrel, keeping `@/lib/types` stable).
+
+See **`docs/CONVENTIONS.md`** for the full file-structure, component,
+and state-management conventions.
 
 ## Worktree-first UX rules
 

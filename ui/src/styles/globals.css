@@ -347,19 +347,28 @@
 
 .btn-ghost {
   @apply btn;
-  color: rgba(244, 245, 248, 0.8);
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  /* Secondary button — visible glass surface that reads as a real
+     button at rest, just less prominent than `.btn-primary`. */
+  color: #f4f5f8;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.14) 0%,
+    rgba(255, 255, 255, 0.06) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 .btn-ghost:hover {
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.06) 0%,
-    rgba(255, 255, 255, 0.03) 100%
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(255, 255, 255, 0.1) 100%
   );
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #f4f5f8;
+  border-color: rgba(255, 255, 255, 0.38);
+  color: #ffffff;
   transform: translateY(-0.5px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 2px 10px rgba(0, 0, 0, 0.25);
 }
 
 .btn-danger {

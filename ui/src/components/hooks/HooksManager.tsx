@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { Copy, X, Trash2, RotateCw, Settings } from "lucide-react";
 import { useRepoStore } from "@/stores/repo";
 import { useHooksStore } from "@/stores/hooks";
-import { WtRpcError, type IpcError } from "@/lib/types";
+import { parseError } from "@/lib/errors";
 
 interface Props {
   onClose: () => void;
@@ -198,13 +198,4 @@ export function HooksManager({ onClose }: Props) {
       </div>
     </div>
   );
-}
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
 }

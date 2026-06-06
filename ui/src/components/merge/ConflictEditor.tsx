@@ -1,5 +1,5 @@
 /**
- * Conflict editor (M8) — the visual side of merge-conflict resolution.
+ * ConflictEditor (M8) — the visual side of merge-conflict resolution.
  *
  * Layout (v1):
  * - Left: file list with status pills (unresolved / staged)
@@ -15,340 +15,12 @@
  * either edit the markers out manually or take a whole side.
  */
 
-import { useEffect, useState } from "react";
-import { invoke } from "@/lib/tauri";
-import { WtRpcError, type ConflictParts, type IpcError } from "@/lib/types";
-import {
-  AlertCircle,
-  Check,
-  ChevronRight,
-  Loader2,
-  X,
-  GitMerge,
-  ArrowRight,
-} from "lucide-react";
-import clsx from "clsx";
+import { AlertCircle, ArrowRight, GitMerge, Loader2, X } from "lucide-react";
 import { useMergeStore } from "@/stores/merge";
-
-export function ConflictEditor() {
-  const context = useMergeStore((s) => s.context);
-  const result = useMergeStore((s) => s.result);
-  const phase = useMergeStore((s) => s.phase);
-  const close = useMergeStore((s) => s.close);
-  const runMergeAgain = useMergeStore((s) => s.runMerge);
-
-  const [paths, setPaths] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [parts, setParts] = useState<ConflictParts | null>(null);
-  const [content, setContent] = useState<string>("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [resolved, setResolved] = useState<Set<string>>(new Set());
-
-  // Load the list of unresolved conflicts when the editor opens.
-  useEffect(() => {
-    if (!context) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const list = await invoke<string[]>("merge_list_unresolved_conflicts", {
-          worktree: context.worktree,
-        });
-        if (!cancelled) {
-          setPaths(list);
-          setSelected(list[0] ?? null);
-        }
-      } catch (e) {
-        if (!cancelled) setError(parseError(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [context]);
-
-  // Load the conflict parts whenever the selected path changes.
-  useEffect(() => {
-    if (!context || !selected) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const p = await invoke<ConflictParts>("merge_conflict_parts", {
-          worktree: context.worktree,
-          path: selected,
-        });
-        if (!cancelled) {
-          setParts(p);
-          // Default the textarea to the current on-disk content
-          // (which has the conflict markers).
-          setContent(p.working ?? "");
-        }
-      } catch (e) {
-        if (!cancelled) setError(parseError(e));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [context, selected]);
-
-  const allResolved = paths.length > 0 && resolved.size === paths.length;
-
-  const markResolved = async () => {
-    if (!context || !selected) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await invoke("merge_stage_resolution", {
-        worktree: context.worktree,
-        path: selected,
-        content,
-      });
-      // Mark the path as resolved in the UI; remove from the
-      // unresolved list. If the working file still has markers,
-      // surface a warning but allow the user to proceed.
-      const hasMarkers = content.includes("<<<<<<<");
-      const next = new Set(resolved);
-      next.add(selected);
-      setResolved(next);
-      const remaining = paths.filter((p) => !next.has(p));
-      setPaths(remaining);
-      if (hasMarkers) {
-        setError(
-          `Heads up: ${selected} still contains conflict markers. ` +
-            `Re-run \`wt merge ${context.targetBranch}\` once the markers are gone.`,
-        );
-      }
-      // Move to the next unresolved file
-      setSelected(remaining[0] ?? null);
-    } catch (e) {
-      setError(parseError(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const useOurs = () => {
-    if (!parts?.ours) return;
-    setContent(parts.ours);
-  };
-  const useTheirs = () => {
-    if (!parts?.theirs) return;
-    setContent(parts.theirs);
-  };
-  const useBase = () => {
-    if (parts?.base === null || parts?.base === undefined) return;
-    setContent(parts.base);
-  };
-
-  const completeMerge = () => {
-    if (!context) return;
-    // Re-run the merge via worktrunk — it'll see a clean state and
-    // commit + branch cleanup. This is the same code path as M7's
-    // "Merge" button.
-    void runMergeAgain(false);
-  };
-
-  if (!context) return null;
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
-      onClick={close}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="modal-panel flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-white/[0.08] bg-bg-panel shadow-[0_4px_24px_rgba(0,0,0,0.4)]"
-        style={{
-          animation: "modal-scale 200ms cubic-bezier(0.25, 0.1, 0.25, 1.0) forwards",
-        }}
-      >
-        <header className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3.5">
-          <h2 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-fg">
-            <GitMerge size={16} className="text-accent" strokeWidth={1.5} />
-            Resolve conflicts
-            <code className="font-mono text-accent">{context.sourceBranch}</code>
-            <ArrowRight size={12} className="text-fg-muted" strokeWidth={1.5} />
-            <code className="font-mono text-accent">{context.targetBranch}</code>
-          </h2>
-          <button onClick={close} className="rounded p-1 text-fg-muted hover:bg-white/[0.04] transition-colors duration-150">
-            <X size={16} strokeWidth={1.5} />
-          </button>
-        </header>
-
-        <div className="flex flex-1 overflow-hidden">
-          {/* File list */}
-          <aside className="w-64 shrink-0 overflow-auto border-r border-white/[0.06] bg-bg">
-            <h3 className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
-              Conflicted files
-            </h3>
-            {paths.length === 0 ? (
-              <p className="px-3 text-[11px] text-fg-muted">
-                No more conflicts. Click <strong>Complete merge</strong> to continue.
-              </p>
-            ) : (
-              <ul>
-                {paths.map((p) => {
-                  const isSelected = p === selected;
-                  const isResolved = resolved.has(p);
-                  return (
-                    <li key={p}>
-                      <button
-                        onClick={() => setSelected(p)}
-                        className={clsx(
-                          "flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] transition-colors duration-150",
-                          isSelected
-                            ? "bg-white/[0.04] text-fg"
-                            : "text-fg-muted hover:bg-white/[0.02]",
-                          isResolved && "opacity-50 line-through",
-                        )}
-                      >
-                        {isResolved ? (
-                          <Check size={12} className="text-success" strokeWidth={1.5} />
-                        ) : isSelected ? (
-                          <ChevronRight size={12} className="text-accent" strokeWidth={1.5} />
-                        ) : (
-                          <span className="w-3" />
-                        )}
-                        <span className="truncate">{p}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </aside>
-
-          {/* Editor */}
-          <main className="flex flex-1 flex-col overflow-hidden">
-            {error && (
-              <div className="border-b border-warning/20 bg-warning/10 px-3 py-2 text-[11px] text-warning">
-                {error}
-              </div>
-            )}
-            {selected && parts ? (
-              <div className="flex flex-1 flex-col overflow-hidden">
-                <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] bg-bg px-3 py-1.5 text-[11px]">
-                  <code className="font-mono text-fg">{selected}</code>
-                  <div className="ml-auto flex items-center gap-1">
-                    <button
-                      onClick={useOurs}
-                      disabled={!parts.ours}
-                      className="rounded border border-white/[0.08] bg-bg-panel px-2 py-0.5 text-fg-muted hover:border-accent/50 hover:text-fg disabled:opacity-50 transition-colors duration-150"
-                    >
-                      Use ours
-                    </button>
-                    <button
-                      onClick={useBase}
-                      disabled={parts.base === null || parts.base === undefined}
-                      className="rounded border border-white/[0.08] bg-bg-panel px-2 py-0.5 text-fg-muted hover:border-accent/50 hover:text-fg disabled:opacity-50 transition-colors duration-150"
-                    >
-                      Use base
-                    </button>
-                    <button
-                      onClick={useTheirs}
-                      disabled={!parts.theirs}
-                      className="rounded border border-white/[0.08] bg-bg-panel px-2 py-0.5 text-fg-muted hover:border-accent/50 hover:text-fg disabled:opacity-50 transition-colors duration-150"
-                    >
-                      Use theirs
-                    </button>
-                  </div>
-                </div>
-                <textarea
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  className="flex-1 resize-none bg-bg p-3 font-mono text-[11px] leading-relaxed focus:outline-none text-fg"
-                  spellCheck={false}
-                />
-                <div className="flex shrink-0 items-center justify-between border-t border-white/[0.06] bg-bg px-3 py-2">
-                  <span className="text-[11px] text-fg-muted">
-                    {resolved.size}/{paths.length + resolved.size} resolved
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setSelected(paths[paths.indexOf(selected ?? "") + 1] ?? null)}
-                      disabled={paths.length <= 1}
-                      className="rounded-md border border-white/[0.08] bg-bg-panel px-2 py-1 text-[11px] text-fg-muted hover:text-fg disabled:opacity-50 transition-colors duration-150"
-                    >
-                      Skip
-                    </button>
-                    <button
-                      onClick={markResolved}
-                      disabled={busy}
-                      className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] text-white hover:bg-accent-hover disabled:opacity-50 transition-colors duration-150"
-                    >
-                      {busy ? <Loader2 size={11} className="animate-spin" strokeWidth={1.5} /> : <Check size={11} strokeWidth={1.5} />}
-                      Mark resolved
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : paths.length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center gap-3 text-fg-muted">
-                <Check size={28} className="text-success" strokeWidth={1.5} />
-                <p className="text-[13px]">All conflicts resolved.</p>
-                <button
-                  onClick={completeMerge}
-                  disabled={phase === "running"}
-                  className="flex items-center gap-1.5 rounded-md bg-accent px-4 py-1.5 text-[11px] text-white hover:bg-accent-hover disabled:opacity-50 transition-colors duration-150"
-                >
-                  {phase === "running" ? (
-                    <Loader2 size={11} className="animate-spin" strokeWidth={1.5} />
-                  ) : (
-                    <GitMerge size={11} strokeWidth={1.5} />
-                  )}
-                  Complete merge
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-1 items-center justify-center text-fg-muted">
-                <Loader2 size={16} className="mr-2 animate-spin" strokeWidth={1.5} />
-                <span className="text-[13px]">Loading…</span>
-              </div>
-            )}
-          </main>
-        </div>
-
-        {/* Bottom: complete-merge CTA + close */}
-        {paths.length > 0 && (
-          <footer className="flex shrink-0 items-center justify-between border-t border-white/[0.06] px-4 py-2">
-            <span className="text-[11px] text-fg-muted">
-              {allResolved
-                ? "All files resolved. Complete the merge to commit."
-                : `Resolve ${paths.length} more file${paths.length === 1 ? "" : "s"} before continuing.`}
-            </span>
-            <div className="flex items-center gap-2">
-              <Button onClick={close}>Cancel</Button>
-              <Button
-                onClick={completeMerge}
-                disabled={!allResolved || phase === "running"}
-                primary
-              >
-                {phase === "running" ? <Loader2 size={11} className="animate-spin" strokeWidth={1.5} /> : <GitMerge size={11} strokeWidth={1.5} />}
-                Complete merge
-              </Button>
-            </div>
-          </footer>
-        )}
-
-        {result && result.conflicts.length > 0 && (
-          <div className="m-3 mt-0 flex items-start gap-2 rounded-md border border-danger/20 bg-danger/10 p-3 text-[11px] text-danger">
-            <AlertCircle size={14} className="mt-0.5 shrink-0" strokeWidth={1.5} />
-            <span>
-              <code className="font-mono">wt merge</code> reported
-              {` ${result.conflicts.length}`} additional conflicts. Open a
-              terminal and run <code className="font-mono">git status</code> for the full list.
-            </span>
-          </div>
-        )}
-
-        {/* The icon import below is a no-op but keeps the bundler
-            tree-shaker honest about the dep. */}
-        {false && null}
-      </div>
-    </div>
-  );
-}
+import { ConflictFileList } from "./ConflictFileList";
+import { ConflictPane } from "./ConflictPane";
+import { useConflictResolver } from "./useConflictResolver";
+import clsx from "clsx";
 
 function Button({
   children,
@@ -378,11 +50,130 @@ function Button({
   );
 }
 
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
+export function ConflictEditor() {
+  const context = useMergeStore((s) => s.context);
+  const result = useMergeStore((s) => s.result);
+  const phase = useMergeStore((s) => s.phase);
+  const close = useMergeStore((s) => s.close);
+
+  const {
+    paths,
+    selected,
+    parts,
+    content,
+    busy,
+    error,
+    resolved,
+    setSelected,
+    setContent,
+    markResolved,
+    useOurs,
+    useTheirs,
+    useBase,
+    completeMerge,
+  } = useConflictResolver();
+
+  const allResolved = paths.length > 0 && resolved.size === paths.length;
+
+  if (!context) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop"
+      onClick={close}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="modal-panel flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-white/[0.08] bg-bg-panel shadow-[0_4px_24px_rgba(0,0,0,0.4)]"
+        style={{
+          animation: "modal-scale 200ms cubic-bezier(0.25, 0.1, 0.25, 1.0) forwards",
+        }}
+      >
+        <header className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3.5">
+          <h2 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-fg">
+            <GitMerge size={16} className="text-accent" strokeWidth={1.5} />
+            Resolve conflicts
+            <code className="font-mono text-accent">{context.sourceBranch}</code>
+            <ArrowRight size={12} className="text-fg-muted" strokeWidth={1.5} />
+            <code className="font-mono text-accent">{context.targetBranch}</code>
+          </h2>
+          <button onClick={close} className="rounded p-1 text-fg-muted hover:bg-white/[0.04] transition-colors duration-150">
+            <X size={16} strokeWidth={1.5} />
+          </button>
+        </header>
+
+        <div className="flex flex-1 overflow-hidden">
+          <ConflictFileList
+            paths={paths}
+            selected={selected}
+            resolved={resolved}
+            onSelect={setSelected}
+          />
+
+          <main className="flex flex-1 flex-col overflow-hidden">
+            {error && (
+              <div className="border-b border-warning/20 bg-warning/10 px-3 py-2 text-[11px] text-warning">
+                {error}
+              </div>
+            )}
+            <ConflictPane
+              selected={selected}
+              parts={parts}
+              content={content}
+              busy={busy}
+              error={null}
+              totalResolved={resolved.size}
+              totalPaths={paths.length}
+              onContentChange={setContent}
+              onUseOurs={useOurs}
+              onUseBase={useBase}
+              onUseTheirs={useTheirs}
+              onSkip={() =>
+                setSelected(paths[paths.indexOf(selected ?? "") + 1] ?? null)
+              }
+              onMarkResolved={markResolved}
+              onCompleteMerge={completeMerge}
+              phase={phase}
+            />
+          </main>
+        </div>
+
+        {paths.length > 0 && (
+          <footer className="flex shrink-0 items-center justify-between border-t border-white/[0.06] px-4 py-2">
+            <span className="text-[11px] text-fg-muted">
+              {allResolved
+                ? "All files resolved. Complete the merge to commit."
+                : `Resolve ${paths.length} more file${paths.length === 1 ? "" : "s"} before continuing.`}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button onClick={close}>Cancel</Button>
+              <Button
+                onClick={completeMerge}
+                disabled={!allResolved || phase === "running"}
+                primary
+              >
+                {phase === "running" ? (
+                  <Loader2 size={11} className="animate-spin" strokeWidth={1.5} />
+                ) : (
+                  <GitMerge size={11} strokeWidth={1.5} />
+                )}
+                Complete merge
+              </Button>
+            </div>
+          </footer>
+        )}
+
+        {result && result.conflicts.length > 0 && (
+          <div className="m-3 mt-0 flex items-start gap-2 rounded-md border border-danger/20 bg-danger/10 p-3 text-[11px] text-danger">
+            <AlertCircle size={14} className="mt-0.5 shrink-0" strokeWidth={1.5} />
+            <span>
+              <code className="font-mono">wt merge</code> reported
+              {` ${result.conflicts.length}`} additional conflicts. Open a
+              terminal and run <code className="font-mono">git status</code> for the full list.
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }

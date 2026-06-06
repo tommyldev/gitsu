@@ -4,8 +4,9 @@
  */
 
 import { create } from "zustand";
-import { invoke } from "@/lib/tauri";
-import { WtRpcError, type IpcError, type HookConfigSnapshot } from "@/lib/types";
+import { hooksSnapshot, hooksInstall, hooksUninstall, wtStepCopyIgnored } from "@/lib/tauri";
+import { type HookConfigSnapshot } from "@/lib/types";
+import { parseError } from "@/lib/errors";
 
 interface HooksState {
   snapshot: HookConfigSnapshot | null;
@@ -34,7 +35,7 @@ export const useHooksStore = create<HooksState>((set, get) => ({
     if (get().fetchedFor === repoPath) return;
     set({ loading: true });
     try {
-      const snap = await invoke<HookConfigSnapshot>("hooks_snapshot", { repo: repoPath });
+      const snap = await hooksSnapshot(repoPath);
       set({ snapshot: snap, fetchedFor: repoPath, loading: false, error: null });
     } catch (e) {
       set({ loading: false, error: parseError(e) });
@@ -44,10 +45,7 @@ export const useHooksStore = create<HooksState>((set, get) => ({
   install: async (repoPath, withWorktreeinclude) => {
     set({ loading: true });
     try {
-      const snap = await invoke<HookConfigSnapshot>("hooks_install", {
-        repo: repoPath,
-        withWorktreeinclude,
-      });
+      const snap = await hooksInstall(repoPath, withWorktreeinclude);
       set({ snapshot: snap, fetchedFor: repoPath, loading: false, error: null });
     } catch (e) {
       set({ loading: false, error: parseError(e) });
@@ -57,7 +55,7 @@ export const useHooksStore = create<HooksState>((set, get) => ({
   uninstall: async (repoPath) => {
     set({ loading: true });
     try {
-      const snap = await invoke<HookConfigSnapshot>("hooks_uninstall", { repo: repoPath });
+      const snap = await hooksUninstall(repoPath);
       set({ snapshot: snap, fetchedFor: repoPath, loading: false, error: null });
     } catch (e) {
       set({ loading: false, error: parseError(e) });
@@ -66,12 +64,7 @@ export const useHooksStore = create<HooksState>((set, get) => ({
 
   recopy: async (repoPath, from, to) => {
     try {
-      await invoke("wt_step_copy_ignored", {
-        repo: repoPath,
-        from,
-        to,
-        force: true,
-      });
+      await wtStepCopyIgnored(repoPath, from, to);
     } catch (e) {
       set({ error: parseError(e) });
     }
@@ -81,12 +74,3 @@ export const useHooksStore = create<HooksState>((set, get) => ({
 
   clear: () => set({ snapshot: null, fetchedFor: null, error: null, dismissed: false }),
 }));
-
-function parseError(e: unknown): string {
-  if (e instanceof WtRpcError) return e.message;
-  if (typeof e === "object" && e && "message" in e) {
-    return (e as IpcError).message ?? String(e);
-  }
-  if (typeof e === "string") return e;
-  return String(e);
-}
