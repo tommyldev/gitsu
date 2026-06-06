@@ -77,8 +77,22 @@ export interface SwitchResult {
   hooks_run: string[];
 }
 
+/**
+ * One element of the `wt remove --format=json` response. Worktrunk
+ * returns a JSON array of these — one entry per thing that was
+ * removed (typically one). The `kind` discriminator decides whether
+ * `path` (worktree removal) or `pruned` (branch-only removal) is
+ * populated.
+ *
+ * Mirrors `src-tauri/src/worktrunk/commands.rs::RemoveResult`.
+ */
 export interface RemoveResult {
   branch: string;
-  removed: boolean;
   branch_deleted: boolean;
+  /** "worktree" | "branch_only" | (future wt values). */
+  kind?: string | null;
+  /** Set when `kind === "worktree"`. */
+  path?: string | null;
+  /** Set when `kind === "branch_only"`. */
+  pruned?: boolean | null;
 }

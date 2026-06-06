@@ -19,7 +19,10 @@ import { AlertTriangle, Trash2, X } from "lucide-react";
 interface Props {
   worktree: Worktree;
   onClose: () => void;
-  onRemoved?: (r: RemoveResult) => void;
+  /** `wt remove` always returns a JSON array of one-or-more entries
+   *  (one per thing removed). We pass the full array through; the
+   *  dialog itself doesn't read it. */
+  onRemoved?: (r: RemoveResult[]) => void;
 }
 
 export function RemoveWorktreeDialog({ worktree, onClose, onRemoved }: Props) {
@@ -37,11 +40,19 @@ export function RemoveWorktreeDialog({ worktree, onClose, onRemoved }: Props) {
 
   // Main worktrees can't be removed — worktrunk enforces this. Just
   // show a friendly error and bail.
+  // Detached-HEAD worktrees also can't be removed through this dialog
+  // because `wt remove` takes a branch name, and a detached worktree
+  // has none. The trash icon is hidden in the worktree list for these
+  // (see `WorktreeList.tsx`); this guard is defense in depth in case
+  // the dialog is opened via some other path.
+  const isDetached = !worktree.branch;
   const blockedReason = isMain
     ? "This is the main worktree. The main worktree is always the repo's anchor and cannot be removed."
     : isCurrent
       ? "This is the currently active worktree. Switch to another worktree first, then remove this one."
-      : null;
+      : isDetached
+        ? "Detached worktrees have no branch and can't be removed through this dialog. Use the terminal to clean it up with `git worktree remove`."
+        : null;
 
   const needsForce = isDirty && !force;
   const needsTypeGate = isMain || isCurrent; // shouldn't get here, but be safe
@@ -50,6 +61,16 @@ export function RemoveWorktreeDialog({ worktree, onClose, onRemoved }: Props) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!repo) return;
+    // `worktree.branch` is `string | null` per the `Worktree` type.
+    // The dialog's submit button is disabled when `blockedReason` is
+    // set (which covers the detached case), but guard here too — if
+    // the dialog is somehow triggered with a null branch, fail loudly
+    // instead of letting Tauri reject the args with a confusing
+    // "invalid type: null, expected a string" error.
+    if (!worktree.branch) {
+      setError("Cannot remove a worktree with no branch (detached HEAD).");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {

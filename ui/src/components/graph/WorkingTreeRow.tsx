@@ -77,7 +77,12 @@ export function WorkingTreeRow({
         opacity={0.9}
       />
 
-      {/* Hollow ring with a tiny inner dot — the "in-progress" cue. */}
+      {/* Dotted ring — the "uncommitted changes attached to HEAD"
+          cue. Uses a dashed stroke (matching the connector/track dash
+          pattern elsewhere) so the empty interior reads as "not a
+          real commit yet". No inner fill: the dashed stroke is the
+          indicator on its own, and a solid dot would compete with
+          the dotted language. */}
       <circle
         cx={cx}
         cy={midY}
@@ -85,8 +90,8 @@ export function WorkingTreeRow({
         fill="#1A1B1D"
         stroke={color}
         strokeWidth={1.5}
+        strokeDasharray="2,2"
       />
-      <circle cx={cx} cy={midY} r={1.2} fill={color} />
 
       {/* Label pill — uses a neutral muted style so it doesn't get
           confused with a real local branch. */}

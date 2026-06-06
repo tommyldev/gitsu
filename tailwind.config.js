@@ -26,9 +26,9 @@ export default {
           DEFAULT: "#c8463c",
           soft: "rgba(200,70,60,0.85)",
         },
-        success: "#4CAF50",
-        warning: "#FFA726",
-        danger: "#EF5350",
+        success: "rgb(76 175 80 / <alpha-value>)",
+        warning: "rgb(255 167 38 / <alpha-value>)",
+        danger: "rgb(239 83 80 / <alpha-value>)",
         info: "#c8cdd6",
         lane: {
           1: "#c8cdd6",

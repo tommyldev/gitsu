@@ -6,7 +6,8 @@
  *  - On mount (or when the file path changes), fetch the file via
  *    the `read_file` IPC command. While the request is in flight
  *    we show a "Loading…" placeholder; on success we render the
- *    content; on binary or error we show a small message.
+ *    content via `CodeFileView`; on binary or error we show a
+ *    small message.
  *  - On unmount, no cleanup is needed (no xterm, no PTY).
  *  - Closing the pane is the parent's responsibility (calls
  *    `closePane`); this component just renders a close button.
@@ -19,6 +20,7 @@ import { useEffect, useState } from "react";
 import { FileText, X } from "lucide-react";
 import clsx from "clsx";
 import { readFile } from "@/lib/tauri";
+import { CodeFileView } from "@/components/ui/CodeFileView";
 
 export interface FileViewerPaneProps {
   paneId: string;
@@ -36,7 +38,7 @@ export interface FileViewerPaneProps {
 
 type LoadState =
   | { kind: "loading" }
-  | { kind: "ok"; content: string; lineCount: number }
+  | { kind: "ok"; content: string }
   | { kind: "binary" }
   | { kind: "error"; message: string };
 
@@ -60,12 +62,7 @@ export function FileViewerPane({
         if (content == null) {
           setState({ kind: "binary" });
         } else {
-          // Count lines. We use the number of `\n` rather than
-          // splitting so we don't allocate an array for large
-          // files. Trailing line without a newline is still a line.
-          let n = 1;
-          for (const ch of content) if (ch === "\n") n++;
-          setState({ kind: "ok", content, lineCount: n });
+          setState({ kind: "ok", content });
         }
       })
       .catch((e: unknown) => {
@@ -132,42 +129,8 @@ export function FileViewerPane({
           </div>
         )}
         {state.kind === "ok" && (
-          <pre className="font-mono text-[11px] leading-[1.4] text-fg">
-            <FileContent content={state.content} lineCount={state.lineCount} />
-          </pre>
+          <CodeFileView value={state.content} path={filePath} />
         )}
-      </div>
-    </div>
-  );
-}
-
-/** Render the file content as a two-column layout: line numbers in
- * a muted gutter, content in a monospace block. We split on `\n`
- * once and render as React nodes — for files larger than ~5k lines
- * this is still snappy enough, and for huge files we accept the
- * cost (the viewer is read-only, so no editing keystrokes to
- * worry about). */
-function FileContent({ content, lineCount }: { content: string; lineCount: number }) {
-  // Build the gutter string once. The width is the number of
-  // digits in the line count, padded to that width.
-  const gutterWidth = String(lineCount).length;
-  const lines = content.split("\n");
-  return (
-    <div className="flex">
-      <div
-        className="sticky left-0 select-none border-r border-white/[0.04] bg-bg px-2 py-1 text-right text-fg-subtle"
-        style={{ minWidth: `${gutterWidth * 0.65 + 1.5}em` }}
-      >
-        {lines.map((_, i) => (
-          <div key={i}>{String(i + 1).padStart(gutterWidth, " ")}</div>
-        ))}
-      </div>
-      <div className="flex-1 px-2 py-1">
-        {lines.map((line, i) => (
-          <div key={i} className="whitespace-pre">
-            {line || " "}
-          </div>
-        ))}
       </div>
     </div>
   );

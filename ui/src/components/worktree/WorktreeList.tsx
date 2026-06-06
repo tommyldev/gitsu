@@ -113,6 +113,12 @@ function WorktreeRow({
   // for them. The "create worktree at this commit" path in the
   // commit context menu still works.
   const canMerge = !wt.is_main && !detached;
+  // Same constraint for the trash icon: `wt remove` takes a branch
+  // name, and a detached worktree has none. Without this gate the
+  // dialog would send `branch: null` to the backend and Tauri would
+  // reject it with "invalid type: null, expected a string". Users
+  // can still clean detached worktrees from the terminal.
+  const canRemove = !wt.is_main && !detached;
   // ⌘/Ctrl + digit shortcut only valid for the first 9 rows. The
   // badge still renders for the 10th+ as a dimmed "—" so the layout
   // doesn't shift when worktrees are added/removed.
@@ -180,16 +186,18 @@ function WorktreeRow({
                   <GitMerge size={12} strokeWidth={1.5} />
                 </button>
               )}
-              <button
-                className="rounded p-1 text-fg-muted transition-colors duration-150 hover:bg-white/[0.04] hover:text-danger"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemove(wt);
-                }}
-                title="Remove worktree"
-              >
-                <Trash2 size={12} strokeWidth={1.5} />
-              </button>
+              {canRemove && (
+                <button
+                  className="rounded p-1 text-fg-muted transition-colors duration-150 hover:bg-white/[0.04] hover:text-danger"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove(wt);
+                  }}
+                  title="Remove worktree"
+                >
+                  <Trash2 size={12} strokeWidth={1.5} />
+                </button>
+              )}
             </div>
           )}
         </div>

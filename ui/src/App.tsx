@@ -28,7 +28,6 @@ import { useEffect, useState } from "react";
 import { useRepoStore, startPolling, stopPolling } from "@/stores/repo";
 import { useGraphStore } from "@/stores/graph";
 import { useHooksStore } from "@/stores/hooks";
-import { useTerminalStore } from "@/stores/terminal";
 import { useMergeStore } from "@/stores/merge";
 import { usePrefsStore } from "@/stores/prefs";
 import { useDirectoryStore } from "@/stores/directory";
@@ -71,7 +70,6 @@ export default function App() {
   const graphClear = useGraphStore((s) => s.clear);
   const hooksFetch = useHooksStore((s) => s.fetch);
   const hooksClear = useHooksStore((s) => s.clear);
-  const terminalClear = useTerminalStore((s) => s.clear);
   const directoryClear = useDirectoryStore((s) => s.clear);
   const mergeClose = useMergeStore((s) => s.close);
   const mergePhase = useMergeStore((s) => s.phase);
@@ -105,13 +103,22 @@ export default function App() {
     if (!repo) {
       graphClear();
       hooksClear();
-      void terminalClear();
+      // NOTE: the terminal store is intentionally NOT cleared
+      // here. PTY shells are kept alive in the backend (the
+      // `portable-pty` registry is process-lifetime), and the
+      // store preserves per-worktree layouts, focus, and the
+      // xterm scrollback round-tripped via `serializedState`.
+      // Clearing on close meant every "close project → reopen
+      // project" round-trip killed all shells and the user
+      // landed on a fresh blank terminal with no history.
+      // We only reap a shell when its worktree is removed
+      // (`wt remove` → `pty::teardown_for_worktree`).
       directoryClear();
       return;
     }
     graphFetch(repo.path);
     hooksFetch(repo.path);
-  }, [repo, graphFetch, graphClear, hooksFetch, hooksClear, terminalClear, directoryClear]);
+  }, [repo, graphFetch, graphClear, hooksFetch, hooksClear, directoryClear]);
 
   useGlobalHotkeys({
     setCreateOpen,

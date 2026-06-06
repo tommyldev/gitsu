@@ -18,8 +18,8 @@ defaults, this file is the first place to update.
 | Open repo                              | — (validate `.git`)                                      | `open_repo`              |
 | Open repo, discover defaults           | `wt config state default-branch`                          | `wt_config_state_default_branch` |
 | List worktrees                         | `wt list --format=json`                                  | `wt_list`                |
-| Create worktree from default base      | `wt switch --create <branch> --format=json`              | `wt_switch_create`       |
-| Create worktree from a specific base   | `wt switch --create <branch> --base <base> --format=json`| `wt_switch_create`       |
+| Create worktree from default base      | `wt switch --create <branch> --format=json --yes`        | `wt_switch_create`       |
+| Create worktree from a specific base   | `wt switch --create <branch> --base <base> --format=json --yes` | `wt_switch_create`       |
 | Create + run command (editor/terminal) | `… --execute '<cmd>'`                                    | `wt_switch_create`       |
 | Switch to existing worktree            | `wt switch <branch> --format=json`                       | `wt_switch`              |
 | Remove worktree                        | `wt remove <branch> --format=json`                       | `wt_remove`              |

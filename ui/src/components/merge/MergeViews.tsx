@@ -213,12 +213,46 @@ function SuccessResult() {
 
   const removeWorktree = async () => {
     if (!context || !result) return;
+    const repo = useRepoStore.getState().repo;
+    if (!repo) return;
+    const removedPath = context.worktree;
     setRemoving(true);
     setRemoveError(null);
     try {
-      await wtRemove(context.worktree, context.sourceBranch, true);
-      void useRepoStore.getState().refresh();
-      void useGraphStore.getState().fetch(context.worktree);
+      // `repo` is the repo's main worktree path — same convention as
+      // the standard RemoveWorktreeDialog flow. Passing the
+      // about-to-be-deleted worktree's path as `repo` would set
+      // `current_dir` to a path that is about to disappear, and is
+      // inconsistent with every other call site.
+      await wtRemove(repo.path, context.sourceBranch, true);
+      // Refresh the worktree list (no longer contains the removed wt).
+      await useRepoStore.getState().refresh();
+      // Switch the graph + terminal selection off the removed worktree
+      // before we close the dialog. If the removed worktree was the
+      // active one, fall back to the main worktree (or the first
+      // remaining worktree if there's no main). Otherwise just leave
+      // the current selection alone. We deliberately do NOT call
+      // `useGraphStore.fetch(removedPath)` — that path no longer
+      // exists, so the fetch would either no-op on stale data or set
+      // an error in the graph store. Both leave the dashboard in a
+      // confusing state where the highlighted row is gone but the
+      // graph/terminal still reference the deleted worktree.
+      const { activePath, setActive } = useGraphStore.getState();
+      const { selectedWorktree, setSelectedWorktree } = useTerminalStore.getState();
+      const needsReselect =
+        activePath === removedPath || selectedWorktree === removedPath;
+      if (needsReselect) {
+        const remaining = useRepoStore
+          .getState()
+          .worktrees?.items.filter((w) => w.path && w.path !== removedPath) ?? [];
+        const fallback =
+          remaining.find((w) => w.is_main) ?? remaining[0] ?? null;
+        const fallbackPath = fallback?.path ?? repo.path;
+        await setActive(fallbackPath);
+        if (selectedWorktree === removedPath) {
+          setSelectedWorktree(fallbackPath);
+        }
+      }
       setRemoved(true);
     } catch (e) {
       setRemoveError(parseError(e));

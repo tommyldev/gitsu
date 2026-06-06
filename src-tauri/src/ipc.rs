@@ -100,7 +100,7 @@ pub async fn wt_remove(
     branch: String,
     delete_branch: Option<bool>,
     force: Option<bool>,
-) -> Result<wt::RemoveResult> {
+) -> Result<Vec<wt::RemoveResult>> {
     let client = wt_for(&state, &app, repo).await?;
     wt::remove(
         &client,

@@ -115,16 +115,31 @@ uses this to launch the editor or attach a terminal.
 Switch to an existing worktree's branch. Currently a thin wrapper; the
 frontend mostly uses `wt_switch_create` for the new-worktree flow.
 
-#### `wt_remove(repo: PathBuf, branch: string, delete_branch?: bool, force?: bool) → RemoveResult`
+#### `wt_remove(repo: PathBuf, branch: string, delete_branch?: bool, force?: bool) → RemoveResult[]`
 `wt remove <branch> --format=json [--delete-branch] [--force]`.
+
+Worktrunk always returns a JSON **array** of one or more entries — one
+per thing that was removed. A typical call returns a single-element
+array. The shape of each entry varies by what was removed:
 
 ```ts
 interface RemoveResult {
   branch: string;
-  removed: boolean;
   branch_deleted: boolean;
+  /** "worktree" | "branch_only" | (future wt values). */
+  kind?: string | null;
+  /** Set when `kind === "worktree"`. */
+  path?: string | null;
+  /** Set when `kind === "branch_only"`. */
+  pruned?: boolean | null;
 }
 ```
+
+The historical struct (`{ branch, removed, branch_deleted }`) was
+wrong: serde silently fell into "treat the first array element as a
+map key" mode and reported `invalid type: map, expected a string at
+line 2 column 2` *after* the sidecar had already removed the worktree
++ branch — hence the "it ends up going through but I see red" symptom.
 
 #### `wt_merge(repo: PathBuf, target: string, no_hooks?: bool) → MergeResult`
 `wt merge <target> --format=json [--no-hooks]`.

@@ -118,6 +118,8 @@ export function CommitPanel() {
         {activeFile ? (
           <FileFocus
             file={activeFile}
+            repo={repo?.path ?? ""}
+            commitSha={mode === "commit" ? node?.sha ?? null : null}
             onBack={() => setActiveFile(null)}
           />
         ) : (

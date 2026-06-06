@@ -164,39 +164,30 @@ pub async fn switch_create(
         args.push("--execute");
         args.push(x);
     }
+    // The Create button is the user's explicit consent for any project
+    // hooks worktrunk might run (e.g. `wt step copy-ignored`). Pass
+    // --yes so worktrunk doesn't abort with "needs approval" in this
+    // non-interactive GUI environment.
+    //
+    // The M6 approval modal will eventually replace this by parsing
+    // the prompt (see `parse_approval_commands`), surfacing the
+    // commands to the user, and only then re-spawning `wt` with
+    // --yes.
+    args.push("--yes");
 
-    match client.run_json::<SwitchResult>(&args).await {
-        Ok(r) => Ok(r),
-        Err(error::Error::Worktrunk(stderr)) => {
-            // Interim path before the M6 approval modal lands: if the
-            // failure is the well-known "needs approval" prompt that
-            // gitsu itself can't answer in a non-interactive GUI,
-            // pre-approve the named commands and re-run with --yes.
-            // The user has explicitly requested this operation
-            // (Create button) and the command being approved is
-            // either gitsu's own `wt step copy-ignored` (pre-approved
-            // at hooks_install time) or another repo hook the user
-            // authored — both are legitimate to auto-approve here.
-            let commands = parse_approval_commands(&stderr);
-            if commands.is_empty() {
-                return Err(error::Error::Worktrunk(stderr));
-            }
-            for cmd in &commands {
-                // Best-effort: a failure here still falls through to
-                // the --yes re-run, which approves at run-time.
-                let _ = config_approvals_add(client, cmd).await;
-            }
-            let mut retry_args = args.clone();
-            retry_args.push("--yes");
-            client.run_json(&retry_args).await
-        }
-        Err(e) => Err(e),
-    }
+    client.run_json::<SwitchResult>(&args).await
 }
 
 /// Parse a worktrunk "needs approval" stderr payload and return the
-/// command names that need pre-approval. Returns an empty Vec if the
+/// command names that need approval. Returns an empty Vec if the
 /// stderr doesn't match the well-known pattern.
+///
+/// Used by the planned M6 approval modal: when a project hook needs
+/// approval, the modal reads the parsed commands and shows per-command
+/// checkboxes before re-spawning `wt` with --yes. Today, `switch_create`
+/// just passes --yes unconditionally (see the comment there) and
+/// this parser sits unused — but the tests below pin the format so
+/// the M6 wiring has a known input shape to work with.
 ///
 /// Worktrunk emits the prompt on a single line, e.g.:
 ///
@@ -207,6 +198,7 @@ pub async fn switch_create(
 /// We extract the segment between the trigger
 /// (`needs approval to execute`) and the failure marker (`✗`),
 /// then pull the command off the end of each `○` bullet.
+#[allow(dead_code)] // Used by the planned M6 approval modal; tests pin the input format.
 fn parse_approval_commands(stderr: &str) -> Vec<String> {
     let Some(start) = stderr.find("needs approval to execute") else {
         return Vec::new();
@@ -247,17 +239,49 @@ pub struct RemoveOpts<'a> {
     pub force: Option<bool>,
 }
 
+/// One element of the `wt remove --format=json` response. Worktrunk
+/// returns a **JSON array** of these — one entry per thing that was
+/// removed (typically one). The shape varies slightly by what was
+/// removed:
+///
+/// - `kind: "worktree"`   → `path` is set, `pruned` is absent.
+/// - `kind: "branch_only"` → `pruned` is set, `path` is absent.
+///
+/// All fields are best-effort: any of `path` / `pruned` may be
+/// missing, and `kind` is opaque from our side (upstream may add
+/// values). We deserialize defensively with `#[serde(default)]` so a
+/// future wt version adding or dropping a field doesn't fail the
+/// whole call.
+///
+/// ## Why this isn't a single object
+///
+/// Earlier we modeled this as a single struct with `{ branch,
+/// removed, branch_deleted }`. That struct was wrong: wt has always
+/// returned an array, so serde silently fell into "treat the first
+/// array element as a map key" mode and reported the cryptic
+/// "invalid type: map, expected a string at line 2 column 2" you saw
+/// in the bug report — *after* the sidecar had already removed the
+/// worktree + branch, hence "it ends up going through but I see red".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoveResult {
     pub branch: String,
-    pub removed: bool,
     pub branch_deleted: bool,
+    /// One of "worktree" | "branch_only" | (future values).
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// Absolute path to the removed worktree, when `kind == "worktree"`.
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    /// Whether the remote tracking ref was pruned, when `kind ==
+    /// "branch_only"`.
+    #[serde(default)]
+    pub pruned: Option<bool>,
 }
 
 pub async fn remove(
     client: &WtClient,
     opts: RemoveOpts<'_>,
-) -> Result<RemoveResult, error::Error> {
+) -> Result<Vec<RemoveResult>, error::Error> {
     let mut args = vec!["remove", "--format=json", opts.branch];
     if opts.delete_branch.unwrap_or(false) {
         args.push("--delete-branch");
@@ -533,8 +557,93 @@ mod tests {
     /// bullets (defensive — same command in two hooks).
     #[test]
     fn parse_approval_commands_dedupes() {
-        let stderr = "▲ repo needs approval to execute 2 commands: ○ post-start copy: wt step copy-ignored ○ post-start extras: wt step copy-ignored ✗ nope (exit 1)";
-        let cmds = parse_approval_commands(stderr);
+        let stderr = "▲ repo needs approval to execute 2 commands: ○ post-start copy: wt step copy-ignored ○ post-start extras: wt step copy-ignored ✗ nope (exit 0)";
+        let cmds = parse_approval_commands(&stderr);
         assert_eq!(cmds, vec!["wt step copy-ignored".to_string()]);
+    }
+
+    /// `wt remove --format=json` always returns a JSON **array** of
+    /// objects. The exact user-reported failure mode was
+    /// "serde: invalid type: map, expected a string at line 2 column 2"
+    /// — which is what serde produces when a struct deserializer is
+    /// handed a JSON array: it tries to treat the first element as a
+    /// map key, and the first field (`branch: String`) is expected to
+    /// be a String, but the first element is actually an object
+    /// (`{` at line 2 col 2). Verifies the corrected Vec<RemoveResult>
+    /// shape accepts both worktree and branch-only outputs.
+    #[test]
+    fn parses_remove_result_worktree_shape() {
+        let json = r#"[
+            {
+                "branch": "tommy/w3spay-receiever-app",
+                "branch_deleted": true,
+                "kind": "worktree",
+                "path": "/home/user/repo.tommy-w3spay-receiever-app"
+            }
+        ]"#;
+        let results: Vec<RemoveResult> =
+            serde_json::from_str(json).expect("worktree remove JSON should parse");
+        assert_eq!(results.len(), 1);
+        let r = &results[0];
+        assert_eq!(r.branch, "tommy/w3spay-receiever-app");
+        assert!(r.branch_deleted);
+        assert_eq!(r.kind.as_deref(), Some("worktree"));
+        assert_eq!(
+            r.path.as_ref().unwrap().to_string_lossy(),
+            "/home/user/repo.tommy-w3spay-receiever-app",
+        );
+        assert!(r.pruned.is_none());
+    }
+
+    #[test]
+    fn parses_remove_result_branch_only_shape() {
+        let json = r#"[
+            {
+                "branch": "tommy/w3spay-receiever-app",
+                "branch_deleted": true,
+                "kind": "branch_only",
+                "pruned": false
+            }
+        ]"#;
+        let results: Vec<RemoveResult> =
+            serde_json::from_str(json).expect("branch-only remove JSON should parse");
+        assert_eq!(results.len(), 1);
+        let r = &results[0];
+        assert_eq!(r.branch, "tommy/w3spay-receiever-app");
+        assert!(r.branch_deleted);
+        assert_eq!(r.kind.as_deref(), Some("branch_only"));
+        assert!(r.path.is_none());
+        assert_eq!(r.pruned, Some(false));
+    }
+
+    /// A multi-entry response (e.g. remove a worktree and a separate
+    /// branch in the same call) must still parse as a Vec.
+    #[test]
+    fn parses_remove_result_multi_entry() {
+        let json = r#"[
+            { "branch": "a", "branch_deleted": true, "kind": "worktree", "path": "/p/a" },
+            { "branch": "b", "branch_deleted": true, "kind": "branch_only", "pruned": false }
+        ]"#;
+        let results: Vec<RemoveResult> = serde_json::from_str(json).expect("parse");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].branch, "a");
+        assert_eq!(results[1].branch, "b");
+        assert_eq!(results[1].pruned, Some(false));
+    }
+
+    /// Upstream may add a `kind` value we don't recognize, or drop
+    /// `path` / `pruned` entirely. The struct must still parse
+    /// (defense in depth — `#[serde(default)]` on the optional
+    /// fields).
+    #[test]
+    fn parses_remove_result_minimal_shape() {
+        let json = r#"[{ "branch": "x", "branch_deleted": true }]"#;
+        let results: Vec<RemoveResult> = serde_json::from_str(json).expect("parse");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].branch, "x");
+        assert!(results[0].branch_deleted);
+        assert!(results[0].kind.is_none());
+        assert!(results[0].path.is_none());
+        assert!(results[0].pruned.is_none());
     }
 }

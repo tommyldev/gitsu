@@ -1,9 +1,27 @@
 /**
- * ConflictPane — per-file ours/theirs/working resolver, extracted from ConflictEditor.
+ * ConflictPane — per-file ours/theirs/working resolver, extracted
+ * from ConflictEditor.
+ *
+ * M8 upgrade: the plain `<textarea>` is replaced with a
+ * CodeMirror 6 editor (via `CodeFileView`) in editable mode,
+ * with the gitsu dark theme and syntax highlighting. Conflict
+ * markers (`<<<<<<<` / `=======` / `>>>>>>>`) are decorated
+ * in-place via `conflictDecorations` so the user sees the
+ * conflict regions as colored blocks rather than plain text.
+ *
+ * ⌘S / Ctrl-S saves the resolution (calls `onMarkResolved`).
+ * The "Mark resolved" button stays as the always-works fallback.
+ *
+ * A small "unsaved" pill renders in the header when the editor
+ * diverges from the file's pre-resolution state (`parts.working`).
  */
 
+import { useMemo } from "react";
 import { Check, GitMerge, Loader2 } from "lucide-react";
 import type { ConflictParts } from "@/lib/types";
+import { CodeFileView } from "@/components/ui/CodeFileView";
+import { conflictDecorations } from "@/lib/conflict-decorations";
+import { Pill } from "@/components/ui/primitives";
 
 interface ConflictPaneProps {
   selected: string | null;
@@ -40,6 +58,13 @@ export function ConflictPane({
   onCompleteMerge,
   phase,
 }: ConflictPaneProps) {
+  // Dirty = editor content differs from the pre-resolution
+  // working file. When the parts load, `content` is set to
+  // `parts.working`; any edit (typing or "Use ..." button)
+  // diverges from that baseline.
+  const dirty = !!parts && content !== (parts.working ?? "");
+
+  const decorations = useMemo(() => conflictDecorations(content), [content]);
 
   if (error) {
     return (
@@ -54,6 +79,11 @@ export function ConflictPane({
       <div className="flex flex-1 flex-col overflow-hidden">
         <div className="flex shrink-0 items-center gap-2 border-b border-white/[0.06] bg-bg px-3 py-1.5 text-[11px]">
           <code className="font-mono text-fg">{selected}</code>
+          {dirty && (
+            <Pill tone="warning" title="You have unsaved changes. ⌘S to mark resolved.">
+              unsaved
+            </Pill>
+          )}
           <div className="ml-auto flex items-center gap-1">
             <button
               onClick={onUseOurs}
@@ -78,12 +108,23 @@ export function ConflictPane({
             </button>
           </div>
         </div>
-        <textarea
-          value={content}
-          onChange={(e) => onContentChange(e.target.value)}
-          className="flex-1 resize-none bg-bg p-3 font-mono text-[11px] leading-relaxed focus:outline-none text-fg"
-          spellCheck={false}
-        />
+        <div className="flex-1 overflow-hidden">
+          <CodeFileView
+            value={content}
+            path={selected}
+            onChange={onContentChange}
+            onSave={() => {
+              // ⌘S / Ctrl-S → mark the file as resolved using the
+              // current editor content. The store's markResolved
+              // closure already reads `content` from state, so we
+              // don't need to pass the value through; we just
+              // kick the action.
+              void onMarkResolved();
+            }}
+            decorations={decorations}
+            className="h-full"
+          />
+        </div>
         <div className="flex shrink-0 items-center justify-between border-t border-white/[0.06] bg-bg px-3 py-2">
           <span className="text-[11px] text-fg-muted">
             {totalResolved}/{totalResolved + totalPaths} resolved

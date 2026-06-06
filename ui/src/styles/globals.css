@@ -682,3 +682,42 @@
 .fade-in {
   animation: fade-in 200ms var(--ease-standard) both;
 }
+
+/* =================================================================
+   CodeMirror — the file viewer/editor used in the directory
+   explorer, the commit panel's "view file at commit" toggle,
+   and the merge conflict resolver.
+
+   The Chrome (gutters, cursor, selection) is themed in
+   `lib/code-theme.ts`. The classes below are the *token* and
+   *decoration* tints. The class names are stable contracts —
+   see `lib/conflict-decorations.ts` for the source of truth.
+   ================================================================= */
+
+/* Conflict-marker tints — match the +/- diff tints in
+   `UnifiedDiff` so the visual language is consistent. */
+.cm-conflict-ours {
+  background-color: rgba(76, 175, 80, 0.10);
+  box-shadow: inset 2px 0 0 rgba(76, 175, 80, 0.6);
+}
+.cm-conflict-separator {
+  background-color: rgba(138, 143, 152, 0.18);
+  font-weight: 600;
+}
+.cm-conflict-base {
+  background-color: rgba(138, 143, 152, 0.10);
+  /* Stray separator — visually quieter than a real separator. */
+  opacity: 0.7;
+}
+.cm-conflict-theirs {
+  background-color: rgba(239, 83, 80, 0.10);
+  box-shadow: inset 2px 0 0 rgba(239, 83, 80, 0.6);
+}
+
+/* When the conflict editor is read-only-but-focusable, keep
+   the editor surface from grabbing global hotkeys. The global
+   `useGlobalHotkeys` already bails on contentEditable targets,
+   so this is belt-and-suspenders. */
+.cm-editor.cm-focused {
+  outline: none;
+}

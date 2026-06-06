@@ -61,10 +61,15 @@ export const wtSwitch = (repo: string, branch: string) =>
 
 export const wtRemove = (
   repo: string,
-  branch: string | null,
+  // The Rust `wt_remove` command requires `branch: String` (see
+  // `src-tauri/src/ipc.rs`). We mirror that here so detached-HEAD
+  // worktrees — where `Worktree.branch` is `null` — are caught at
+  // compile time at the call site instead of producing a runtime
+  // "invalid type: null, expected a string" Tauri argument error.
+  branch: string,
   deleteBranch?: boolean,
   force?: boolean,
-) => invoke<RemoveResult>("wt_remove", { repo, branch, deleteBranch, force });
+) => invoke<RemoveResult[]>("wt_remove", { repo, branch, deleteBranch, force });
 
 export const wtMerge = (repo: string, target: string, noHooks?: boolean) =>
   invoke<MergeResult>("wt_merge", { repo, target, noHooks });

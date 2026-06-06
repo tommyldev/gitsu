@@ -216,6 +216,14 @@ fn collect_files(diff: &mut git2::Diff<'_>) -> Result<Vec<FileDiff>> {
             '-' => entry.1 += 1,
             _ => {}
         }
+        // libgit2 strips the leading +/-/space from content lines and
+        // reports it via `origin` instead; re-attach it so `patch` is a
+        // valid unified diff the frontend can classify per line. File,
+        // hunk, and binary headers ('F'/'H'/'B') already carry their
+        // full text, so they get no prefix.
+        if matches!(origin, '+' | '-' | ' ') {
+            entry.2.push(origin);
+        }
         entry.2.push_str(&content);
         true
     })
@@ -366,6 +374,48 @@ mod tests {
             .unwrap();
         assert!(lib.additions >= 1, "expected at least 1 add in lib, got {}", lib.additions);
         assert_eq!(lib.deletions, 0);
+    }
+
+    #[test]
+    fn patch_lines_carry_unified_diff_prefixes() {
+        // Regression: libgit2 reports the +/-/space prefix via the line
+        // `origin`, not in the line content. If we don't re-attach it,
+        // the emitted patch has no +/- markers and the UI can't color
+        // additions/deletions. Assert the prefixes survive into `patch`.
+        let tmp = build_repo_path();
+        let r = Repository::open(&tmp).unwrap();
+        let head = r.head().unwrap().target().unwrap().to_string();
+        let files = commit_diff(&tmp, &head).unwrap();
+
+        // README: "# hello" -> "# hello world" is one del + one add.
+        let readme = files
+            .iter()
+            .find(|f| f.new_path.as_deref() == Some("README.md"))
+            .unwrap();
+        let lines: Vec<&str> = readme.patch.lines().collect();
+        assert!(
+            lines.iter().any(|l| *l == "-# hello"),
+            "expected '-# hello' del line, patch=\n{}",
+            readme.patch
+        );
+        assert!(
+            lines.iter().any(|l| *l == "+# hello world"),
+            "expected '+# hello world' add line, patch=\n{}",
+            readme.patch
+        );
+
+        // lib.rs is a new file: its sole content line must be an add.
+        let lib = files
+            .iter()
+            .find(|f| f.new_path.as_deref() == Some("src/lib.rs"))
+            .unwrap();
+        assert!(
+            lib.patch
+                .lines()
+                .any(|l| l == "+pub fn add(a: i32, b: i32) -> i32 { a + b }"),
+            "expected prefixed add line for new file, patch=\n{}",
+            lib.patch
+        );
     }
 
     #[test]

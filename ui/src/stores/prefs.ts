@@ -31,6 +31,13 @@ interface PrefsState {
   hideGraphPanel: boolean;
   hideWorktreeList: boolean;
   hideCommitPanel: boolean;
+  /**
+   * Visual theme. v1 ships dark-only; the field exists so
+   * `useCodeMirrorTheme` and the global CSS swap have a single
+   * source of truth when the light variant lands. See
+   * `lib/code-theme.ts`.
+   */
+  theme: "dark" | "light";
 
   setHideGraphPanel: (v: boolean) => void;
   toggleHideGraphPanel: () => void;
@@ -40,6 +47,8 @@ interface PrefsState {
 
   setHideCommitPanel: (v: boolean) => void;
   toggleHideCommitPanel: () => void;
+
+  setTheme: (t: "dark" | "light") => void;
 }
 
 const STORAGE_KEY = "gitsu:prefs:v1";
@@ -80,6 +89,7 @@ export const usePrefsStore = create<PrefsState>()(
       hideGraphPanel: false,
       hideWorktreeList: false,
       hideCommitPanel: false,
+      theme: "dark",
 
       setHideGraphPanel: (v) => set({ hideGraphPanel: v }),
       toggleHideGraphPanel: () => set({ hideGraphPanel: !get().hideGraphPanel }),
@@ -89,6 +99,8 @@ export const usePrefsStore = create<PrefsState>()(
 
       setHideCommitPanel: (v) => set({ hideCommitPanel: v }),
       toggleHideCommitPanel: () => set({ hideCommitPanel: !get().hideCommitPanel }),
+
+      setTheme: (t) => set({ theme: t }),
     }),
     {
       name: STORAGE_KEY,
@@ -98,6 +110,7 @@ export const usePrefsStore = create<PrefsState>()(
         hideGraphPanel: s.hideGraphPanel,
         hideWorktreeList: s.hideWorktreeList,
         hideCommitPanel: s.hideCommitPanel,
+        theme: s.theme,
       }),
     },
   ),
