@@ -91,7 +91,7 @@ export function FileFocus({ file, repo, commitSha, onBack }: FileFocusProps) {
         <button
           onClick={onBack}
           className="rounded p-1 text-fg-muted transition-colors duration-150 hover:bg-white/[0.04] hover:text-fg"
-          title="Back to file list"
+          title="Back to graph"
         >
           <ArrowLeft size={14} strokeWidth={1.5} />
         </button>
@@ -144,7 +144,7 @@ export function FileFocus({ file, repo, commitSha, onBack }: FileFocusProps) {
               Binary file — no preview.
             </div>
           ) : (
-            <UnifiedDiff patch={file.patch} />
+            <UnifiedDiff patch={file.patch} path={path} />
           )
         ) : state.kind === "loading" || state.kind === "idle" ? (
           <div className="flex h-full items-center justify-center text-[13px] text-fg-muted">

@@ -50,16 +50,25 @@ export function TerminalStrip({ fillsAvailable = false }: { fillsAvailable?: boo
   const [collapsed, setCollapsed] = useState(false);
 
   // When a repo opens but no worktree is selected, default to the
-  // repo's main path. Keep this in a small effect so we don't
-  // write to the store on every render.
+  // repo's main path. When the repo changes (project switch), reset
+  // the selection unconditionally — the old project's worktree paths
+  // won't exist in the new project, so the stale `selectedWorktree`
+  // would leave the terminal strip blank and prevent the auto-spawn
+  // effect from creating the first terminal. We track the repo path
+  // in a ref so we only fire on actual repo changes, not on every
+  // re-render caused by worktree-list polling.
+  const prevRepoRef = useRef<string | null>(null);
   useEffect(() => {
-    if (repo && !selectedWorktree) {
-      setSelectedWorktree(repo.path);
+    const currentRepoPath = repo?.path ?? null;
+    if (currentRepoPath !== prevRepoRef.current) {
+      prevRepoRef.current = currentRepoPath;
+      if (repo) {
+        setSelectedWorktree(repo.path);
+      } else {
+        setSelectedWorktree(null);
+      }
     }
-    if (!repo && selectedWorktree) {
-      setSelectedWorktree(null);
-    }
-  }, [repo, selectedWorktree, setSelectedWorktree]);
+  }, [repo, setSelectedWorktree]);
 
   const layout = useTerminalStore((s) =>
     selectedWorktree ? s.layouts.get(selectedWorktree) : undefined,

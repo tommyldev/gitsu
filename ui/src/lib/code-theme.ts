@@ -20,7 +20,7 @@
 import { useMemo } from "react";
 import { EditorView } from "@codemirror/view";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { tags as t } from "@lezer/highlight";
+import { tags as t, type Tag } from "@lezer/highlight";
 import type { Extension } from "@codemirror/state";
 import { usePrefsStore } from "@/stores/prefs";
 
@@ -69,8 +69,18 @@ const GITSU_DARK = EditorView.theme(
   { dark: true },
 );
 
-/** Token colors — semantic, palette-anchored. */
-const DARK_HIGHLIGHT = HighlightStyle.define([
+/** Token colors — semantic, palette-anchored. Shared with the
+ * static diff highlighter (`lib/highlight.ts`) so a file is tinted
+ * identically in the editor and in the unified-diff view. */
+export interface TokenStyle {
+  tag: Tag | readonly Tag[];
+  color: string;
+  fontWeight?: string;
+  fontStyle?: string;
+  textDecoration?: string;
+}
+
+export const TOKEN_STYLES: readonly TokenStyle[] = [
   { tag: t.keyword, color: "#c8cdd6", fontWeight: "600" },
   { tag: [t.string, t.special(t.string)], color: "#4CAF50" },
   { tag: t.number, color: "#FFA726" },
@@ -84,7 +94,10 @@ const DARK_HIGHLIGHT = HighlightStyle.define([
   { tag: [t.operator, t.punctuation], color: "#8A8F98" },
   { tag: t.url, color: "#4CAF50", textDecoration: "underline" },
   { tag: t.invalid, color: "#EF5350" },
-]);
+];
+
+/** Token colors as a CodeMirror highlight style for the editor. */
+const DARK_HIGHLIGHT = HighlightStyle.define(TOKEN_STYLES as TokenStyle[]);
 
 /** The single dark theme extension array. */
 const DARK_THEME: Extension = [GITSU_DARK, syntaxHighlighting(DARK_HIGHLIGHT)];

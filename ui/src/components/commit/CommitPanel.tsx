@@ -23,7 +23,7 @@ import { parseError } from "@/lib/errors";
 import type { FileDiff } from "@/lib/types";
 import { DiffViewer } from "./DiffViewer";
 import { CommitHeader } from "./CommitHeader";
-import { FileFocus } from "./FileFocus";
+import { useFileViewerStore } from "@/stores/fileViewer";
 type Mode = "commit" | "workdir";
 
 export function CommitPanel() {
@@ -33,7 +33,6 @@ export function CommitPanel() {
   const [files, setFiles] = useState<FileDiff[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeFile, setActiveFile] = useState<FileDiff | null>(null);
 
   const node = useMemo(
     () => graph?.nodes.find((n) => n.sha === selectedSha),
@@ -54,7 +53,7 @@ export function CommitPanel() {
     setError(null);
     setLoading(true);
     setFiles([]);
-    setActiveFile(null);
+    useFileViewerStore.getState().close();
     let cancelled = false;
     (async () => {
       try {
@@ -115,54 +114,51 @@ export function CommitPanel() {
       )}
 
       <div className="flex-1 overflow-auto">
-        {activeFile ? (
-          <FileFocus
-            file={activeFile}
-            repo={repo?.path ?? ""}
-            commitSha={mode === "commit" ? node?.sha ?? null : null}
-            onBack={() => setActiveFile(null)}
+        {mode === "commit" && node ? (
+          <CommitHeader
+            sha={node.sha}
+            shortSha={node.short_sha}
+            summary={node.summary}
+            body={node.body}
+            authorName={node.author_name}
+            authorEmail={node.author_email}
+            authorTime={node.author_time}
+            committerTime={node.committer_time}
+            tree={node.tree}
+            branches={branches}
+            tags={tags}
           />
+        ) : null}
+
+        {mode === "workdir" && (
+          <div className="border-b border-white/[0.06] px-4 py-2 text-[13px]">
+            <span className="font-medium text-fg">Uncommitted changes</span>
+            <p className="text-[11px] text-fg-muted">
+              Showing staged + unstaged + untracked files in the working tree.
+            </p>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex items-center justify-center p-6 text-fg-muted">
+            <Loader2 size={14} className="mr-2 animate-spin" strokeWidth={1.5} />
+            <span className="text-[13px]">Loading…</span>
+          </div>
         ) : (
-          <>
-            {mode === "commit" && node ? (
-              <CommitHeader
-                sha={node.sha}
-                shortSha={node.short_sha}
-                summary={node.summary}
-                body={node.body}
-                authorName={node.author_name}
-                authorEmail={node.author_email}
-                authorTime={node.author_time}
-                committerTime={node.committer_time}
-                tree={node.tree}
-                branches={branches}
-                tags={tags}
-              />
-            ) : null}
-
-            {mode === "workdir" && (
-              <div className="border-b border-white/[0.06] px-4 py-2 text-[13px]">
-                <span className="font-medium text-fg">Uncommitted changes</span>
-                <p className="text-[11px] text-fg-muted">
-                  Showing staged + unstaged + untracked files in the working tree.
-                </p>
-              </div>
-            )}
-
-            {loading ? (
-              <div className="flex items-center justify-center p-6 text-fg-muted">
-                <Loader2 size={14} className="mr-2 animate-spin" strokeWidth={1.5} />
-                <span className="text-[13px]">Loading…</span>
-              </div>
-            ) : (
-              <DiffViewer
-                worktree={repo?.path ?? ""}
-                files={files}
-                loading={false}
-                onFileClick={(f) => setActiveFile(f)}
-              />
-            )}
-          </>
+          <DiffViewer
+            worktree={repo?.path ?? ""}
+            files={files}
+            loading={false}
+            onFileClick={(f) =>
+              useFileViewerStore
+                .getState()
+                .open(
+                  f,
+                  repo?.path ?? "",
+                  mode === "commit" ? node?.sha ?? null : null,
+                )
+            }
+          />
         )}
       </div>
     </aside>

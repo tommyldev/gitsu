@@ -7,7 +7,7 @@
  * rich Shiki rendering once we have a per-line tokenizer.
  */
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import clsx from "clsx";
 import {
   ChevronDown,
@@ -19,7 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { FileDiff, DiffStatus } from "@/lib/types";
-import { parsePatch } from "@/lib/diff";
+import { UnifiedDiff } from "./UnifiedDiff";
 
 interface Props {
   worktree: string;
@@ -136,46 +136,9 @@ function FileDiffRow({
       </button>
       {isOpen && !file.is_binary && (
         <div className="bg-bg">
-          <UnifiedPatch patch={file.patch} />
+          <UnifiedDiff patch={file.patch} path={path} dense />
         </div>
       )}
     </div>
-  );
-}
-
-function UnifiedPatch({ patch }: { patch: string }) {
-  const lines = useMemo(() => parsePatch(patch), [patch]);
-  return (
-    <pre className="overflow-x-auto p-2 font-mono text-[11px] leading-relaxed">
-      <code>
-        {lines.map((line, i) => (
-          <div
-            key={i}
-            className={clsx(
-              "flex",
-              line.kind === "add" &&
-                "bg-success/10 shadow-[inset_2px_0_0_rgba(76,175,80,0.6)]",
-              line.kind === "del" &&
-                "bg-danger/10 shadow-[inset_2px_0_0_rgba(239,83,80,0.6)]",
-              (line.kind === "meta" || line.kind === "context") && "text-fg",
-            )}
-          >
-            <span
-              className={clsx(
-                "inline-block w-12 shrink-0 select-none pr-2 text-right",
-                line.kind === "add"
-                  ? "text-success"
-                  : line.kind === "del"
-                    ? "text-danger"
-                    : "text-fg-muted",
-              )}
-            >
-              {line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}
-            </span>
-            <span className="whitespace-pre">{line.content}</span>
-          </div>
-        ))}
-      </code>
-    </pre>
   );
 }
