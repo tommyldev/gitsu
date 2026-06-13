@@ -105,6 +105,10 @@ pub fn workdir_diff(repo: &Path) -> Result<Vec<FileDiff>> {
     let mut opts = DiffOptions::new();
     opts.include_untracked(true);
     opts.recurse_untracked_dirs(true);
+    // Without this, libgit2 lists untracked files as deltas but emits
+    // no line content, so their patch is empty and add/del counts come
+    // out as +0 -0. Show their content so new files get real counts.
+    opts.show_untracked_content(true);
 
     let mut diff = r
         .diff_tree_to_workdir(head_tree.as_ref(), Some(&mut opts))
@@ -430,5 +434,27 @@ mod tests {
         let tmp = build_repo_path();
         let content = file_content(&tmp, "HEAD", "does/not/exist.rs").unwrap();
         assert!(content.is_none());
+    }
+
+    #[test]
+    fn workdir_diff_counts_untracked_files() {
+        // Regression: untracked (new, unstaged) files must report real
+        // add counts and patch text in the working-tree view, not +0 -0.
+        let tmp = build_repo_path();
+        std::fs::write(tmp.join("notes.txt"), "alpha\nbeta\ngamma\n").unwrap();
+
+        let files = workdir_diff(&tmp).unwrap();
+        let notes = files
+            .iter()
+            .find(|f| f.new_path.as_deref() == Some("notes.txt"))
+            .expect("untracked notes.txt should appear in workdir diff");
+        assert_eq!(notes.status, DiffStatus::Untracked);
+        assert_eq!(notes.additions, 3, "patch=\n{}", notes.patch);
+        assert_eq!(notes.deletions, 0);
+        assert!(
+            notes.patch.lines().any(|l| l == "+beta"),
+            "expected prefixed add line, patch=\n{}",
+            notes.patch
+        );
     }
 }

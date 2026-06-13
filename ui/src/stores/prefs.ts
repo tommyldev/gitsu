@@ -39,6 +39,17 @@ interface PrefsState {
    */
   theme: "dark" | "light";
 
+  /**
+   * xterm font size in CSS pixels. Bumped with ⌘= / ⌘- (these map
+   * to the physical `+`/`-` keys, which require Shift for `+` on
+   * US layouts) and reset with ⌘0. Clamped to a reasonable range
+   * (8..24) so a stuck key can't produce a one-cell-per-screen
+   * terminal. Lives in `prefs` (not the terminal store) so the
+   * value persists across restarts and is a natural sibling to
+   * the other UI prefs.
+   */
+  terminalFontSize: number;
+
   setHideGraphPanel: (v: boolean) => void;
   toggleHideGraphPanel: () => void;
 
@@ -49,9 +60,25 @@ interface PrefsState {
   toggleHideCommitPanel: () => void;
 
   setTheme: (t: "dark" | "light") => void;
+
+  setTerminalFontSize: (px: number) => void;
+  bumpTerminalFontSize: (delta: number) => void;
+  resetTerminalFontSize: () => void;
 }
 
 const STORAGE_KEY = "gitsu:prefs:v1";
+
+/** Min/max for the terminal font size. Below 8 px is unreadable; above
+ *  24 px makes even a 4K monitor only fit ~25 cols. */
+const FONT_SIZE_MIN = 8;
+const FONT_SIZE_MAX = 24;
+const FONT_SIZE_DEFAULT = 12;
+
+/** Clamp a candidate font size into the allowed range. */
+function clampFontSize(px: number): number {
+  if (Number.isNaN(px)) return FONT_SIZE_DEFAULT;
+  return Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(px)));
+}
 
 /**
  * Backward-compatible storage. Earlier builds wrote a flat
@@ -90,6 +117,7 @@ export const usePrefsStore = create<PrefsState>()(
       hideWorktreeList: false,
       hideCommitPanel: false,
       theme: "dark",
+      terminalFontSize: FONT_SIZE_DEFAULT,
 
       setHideGraphPanel: (v) => set({ hideGraphPanel: v }),
       toggleHideGraphPanel: () => set({ hideGraphPanel: !get().hideGraphPanel }),
@@ -101,6 +129,11 @@ export const usePrefsStore = create<PrefsState>()(
       toggleHideCommitPanel: () => set({ hideCommitPanel: !get().hideCommitPanel }),
 
       setTheme: (t) => set({ theme: t }),
+
+      setTerminalFontSize: (px) => set({ terminalFontSize: clampFontSize(px) }),
+      bumpTerminalFontSize: (delta) =>
+        set({ terminalFontSize: clampFontSize(get().terminalFontSize + delta) }),
+      resetTerminalFontSize: () => set({ terminalFontSize: FONT_SIZE_DEFAULT }),
     }),
     {
       name: STORAGE_KEY,
@@ -111,6 +144,7 @@ export const usePrefsStore = create<PrefsState>()(
         hideWorktreeList: s.hideWorktreeList,
         hideCommitPanel: s.hideCommitPanel,
         theme: s.theme,
+        terminalFontSize: s.terminalFontSize,
       }),
     },
   ),

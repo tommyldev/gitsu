@@ -360,6 +360,81 @@ interface StashPopResult {
 }
 ```
 
+## Commit composer (graph view)
+
+These commands back the staging panel under the worktree list and
+the pending working-tree node in the commit graph. Like the action
+bar above, they run against the **active worktree**'s path. All are
+libgit2 (`src-tauri/src/git/stage.rs`, `src-tauri/src/git/checkout.rs`).
+
+### `git_status_list(worktree: PathBuf) → StatusEntry[]`
+
+Per-path index + worktree status, sorted by path. `staged` and
+`unstaged` are independent — a file staged and then modified again
+appears with both set.
+
+```ts
+type ChangeKind =
+  | "added" | "modified" | "deleted" | "renamed"
+  | "typechange" | "untracked" | "conflicted";
+
+interface StatusEntry {
+  path: string;
+  staged: ChangeKind | null;
+  unstaged: ChangeKind | null;
+}
+```
+
+### `git_stage(worktree: PathBuf, path: string) → void`
+
+Stage one path (`git add <path>`; records deletions when the file
+is gone from the working tree).
+
+### `git_unstage(worktree: PathBuf, path: string) → void`
+
+Unstage one path (`git restore --staged <path>`). On an unborn HEAD
+the index entry is removed.
+
+### `git_stage_all(worktree: PathBuf) → void`
+
+`git add -A`: stages new + modified paths and records deletions.
+
+### `git_unstage_all(worktree: PathBuf) → void`
+
+Unstage every currently-staged path.
+
+### `git_commit(worktree: PathBuf, message: string) → CommitResult`
+
+Commit the index. Refuses an empty (whitespace-only) message and an
+index identical to HEAD's tree — the UI never creates empty commits.
+Signature comes from `user.name`/`user.email`, falling back to
+`gitsu <gitsu@local>` so an unconfigured machine can still commit.
+
+```ts
+interface CommitResult {
+  sha: string;
+  short_sha: string;
+  summary: string;          // first line of the message
+  branch: string | null;    // null on detached HEAD
+}
+```
+
+### `git_checkout_commit(worktree: PathBuf, sha: string) → CheckoutResult`
+
+Check out a commit in the current worktree, detaching HEAD. Uses
+libgit2's *safe* strategy: local changes that would be clobbered
+abort the call with an error (nothing is overwritten); untracked
+files are preserved. Backs the graph context menu's
+"This commit (detached HEAD)" action.
+
+```ts
+interface CheckoutResult {
+  sha: string;
+  short_sha: string;
+  detached: boolean; // always true today
+}
+```
+
 ### PTY (M2.1)
 
 The terminal strip uses a per-worktree `portable-pty` session. The

@@ -17,7 +17,7 @@ import {
   GitBranch,
 } from "lucide-react";
 import { Button, Pill } from "@/components/ui/primitives";
-import { BrandMark, HankoSeal } from "@/components/ui/BrandMark";
+import { BrandMark } from "@/components/ui/BrandMark";
 import { secondsAgo } from "@/lib/format";
 import type { RecentRepo, VersionInfo } from "@/lib/types";
 
@@ -65,7 +65,6 @@ export function Header({
         <div className="flex items-center gap-2">
           <BrandMark />
           <span className="text-[15px] font-semibold tracking-tight text-fg">gitsu</span>
-          <HankoSeal />
         </div>
         {repo ? (
           <>
@@ -100,28 +99,6 @@ export function Header({
               <Command size={14} strokeWidth={1.5} /> Palette
             </Button>
             <Button
-              onClick={onToggleLeft}
-              title={leftHidden ? "Show worktree list (⌘B)" : "Hide worktree list (⌘B)"}
-              aria-pressed={leftHidden}
-            >
-              {leftHidden ? <PanelLeftOpen size={14} strokeWidth={1.5} /> : <PanelLeftClose size={14} strokeWidth={1.5} />}
-            </Button>
-            <Button
-              onClick={onToggleRight}
-              title={
-                viewHidden
-                  ? rightHidden
-                    ? "Show file explorer (⌘⌥B)"
-                    : "Hide file explorer (⌘⌥B)"
-                  : rightHidden
-                    ? "Show commit panel (⌘⌥B)"
-                    : "Hide commit panel (⌘⌥B)"
-              }
-              aria-pressed={rightHidden}
-            >
-              {rightHidden ? <PanelRightOpen size={14} strokeWidth={1.5} /> : <PanelRightClose size={14} strokeWidth={1.5} />}
-            </Button>
-            <Button
               onClick={onToggleView}
               title={
                 viewHidden
@@ -148,6 +125,28 @@ export function Header({
             </Button>
             <Button variant="primary" onClick={onCreate} title="New worktree (⌘N / Ctrl+N)">
               <Plus size={14} strokeWidth={1.5} /> New worktree
+            </Button>
+            <Button
+              onClick={onToggleLeft}
+              title={leftHidden ? "Show worktree list (⌘B)" : "Hide worktree list (⌘B)"}
+              aria-pressed={leftHidden}
+            >
+              {leftHidden ? <PanelLeftOpen size={14} strokeWidth={1.5} /> : <PanelLeftClose size={14} strokeWidth={1.5} />}
+            </Button>
+            <Button
+              onClick={onToggleRight}
+              title={
+                viewHidden
+                  ? rightHidden
+                    ? "Show file explorer (⌘⌥B)"
+                    : "Hide file explorer (⌘⌥B)"
+                  : rightHidden
+                    ? "Show commit panel (⌘⌥B)"
+                    : "Hide commit panel (⌘⌥B)"
+              }
+              aria-pressed={rightHidden}
+            >
+              {rightHidden ? <PanelRightOpen size={14} strokeWidth={1.5} /> : <PanelRightClose size={14} strokeWidth={1.5} />}
             </Button>
           </>
         )}

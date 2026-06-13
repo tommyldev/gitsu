@@ -111,7 +111,7 @@ export function CommitRow({
         cx={cx}
         cy={midY}
         r={CIRCLE_R + 1}
-        fill={selected ? "#1A1B1D" : "#222326"}
+        fill={selected ? "#101113" : "#141519"}
         stroke={color}
         strokeWidth={1.5}
       />

@@ -6,13 +6,16 @@
  *   - Create worktree at this commit (calls `wt switch --create <branch> <commit>`)
  *   - Checkout (switch to) any local branch that points to this commit
  *     (calls `wt switch <branch>`)
+ *   - Checkout this exact commit in the current worktree (detached
+ *     HEAD, libgit2 safe checkout — local changes are never clobbered)
  *   - List remote-tracking branches that also point to this commit
  */
 
 import { useEffect, useRef } from "react";
-import { Copy, GitBranch, Hash, X, ArrowRightToLine } from "lucide-react";
-import { wtSwitchCreate, wtSwitch } from "@/lib/tauri";
+import { Copy, GitBranch, Hash, X, ArrowRightToLine, History } from "lucide-react";
+import { wtSwitchCreate, wtSwitch, gitCheckoutCommit } from "@/lib/tauri";
 import { useRepoStore } from "@/stores/repo";
+import { useGraphStore } from "@/stores/graph";
 import { type BranchRef } from "@/lib/types";
 import { parseError } from "@/lib/errors";
 
@@ -90,6 +93,24 @@ export function CommitContextMenu({ target, onClose }: { target: CommitMenuTarge
     }
   };
 
+  // Checkout the exact commit in the *current* worktree, detaching
+  // HEAD. The backend uses a safe checkout, so dirty files that would
+  // be clobbered abort with a clear error instead of losing work.
+  const checkoutCommit = async () => {
+    const graphStore = useGraphStore.getState();
+    const worktree = graphStore.activePath;
+    if (!worktree) return;
+    try {
+      await gitCheckoutCommit(worktree, target.sha);
+      await refresh();
+      await graphStore.fetch(worktree);
+    } catch (e) {
+      alert(parseError(e));
+    } finally {
+      onClose();
+    }
+  };
+
   const localBranches = target.branches.filter((b) => b.is_local);
   const remoteBranches = target.branches.filter((b) => !b.is_local);
 
@@ -156,6 +177,9 @@ export function CommitContextMenu({ target, onClose }: { target: CommitMenuTarge
         <li className="mt-1 border-t border-white/[0.06] px-3 pb-1 pt-2 text-[10px] uppercase tracking-wider text-fg-muted">
           Checkout
         </li>
+        <MenuItem icon={<History size={13} strokeWidth={1.5} />} onClick={checkoutCommit}>
+          This commit (detached HEAD)
+        </MenuItem>
         {localBranches.length > 0 ? (
           localBranches.slice(0, 8).map((b) => (
             <li key={b.name}>

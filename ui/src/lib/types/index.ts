@@ -10,6 +10,7 @@ export * from "./worktree";
 export * from "./repo";
 export * from "./graph";
 export * from "./diff";
+export * from "./stage";
 export * from "./merge";
 export * from "./hooks";
 export * from "./pty";

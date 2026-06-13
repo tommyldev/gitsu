@@ -26,6 +26,10 @@ interface Props {
   files: FileDiff[];
   loading: boolean;
   onFileClick?: (file: FileDiff) => void;
+  /** Optional per-row trailing action (e.g. the stage/unstage toggle
+   *  in the working-tree view). Rendered outside the row's toggle
+   *  button — keyed by the file's display path. */
+  trailing?: (file: FileDiff) => React.ReactNode;
 }
 
 const STATUS_ICON: Record<DiffStatus, LucideIcon> = {
@@ -50,7 +54,7 @@ const STATUS_TONE: Record<DiffStatus, string> = {
   ignored: "text-fg-subtle",
 };
 
-export function DiffViewer({ files, loading, onFileClick }: Props) {
+export function DiffViewer({ files, loading, onFileClick, trailing }: Props) {
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const toggle = (path: string) => {
     setOpen((prev) => {
@@ -93,6 +97,7 @@ export function DiffViewer({ files, loading, onFileClick }: Props) {
             file={f}
             isOpen={open.has(key)}
             onToggle={() => handleClick(f)}
+            trailing={trailing?.(f)}
           />
         );
       })}
@@ -104,10 +109,12 @@ function FileDiffRow({
   file,
   isOpen,
   onToggle,
+  trailing,
 }: {
   file: FileDiff;
   isOpen: boolean;
   onToggle: () => void;
+  trailing?: React.ReactNode;
 }) {
   const path = file.new_path ?? file.old_path ?? "(unknown)";
   const Icon = STATUS_ICON[file.status] ?? FileEdit;
@@ -115,25 +122,28 @@ function FileDiffRow({
 
   return (
     <div>
-      <button
-        onClick={onToggle}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] hover:bg-white/[0.03] transition-colors duration-150"
-      >
-        {isOpen ? <ChevronDown size={12} strokeWidth={1.5} /> : <ChevronRight size={12} strokeWidth={1.5} />}
-        <Icon size={12} className={tone} strokeWidth={1.5} />
-        <span className={clsx("shrink-0", tone)}>{file.status}</span>
-        <span className="truncate text-fg">{path}</span>
-        {file.is_binary ? (
-          <span className="ml-auto rounded bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-fg-muted">
-            binary
-          </span>
-        ) : (
-          <span className="ml-auto flex gap-1.5 font-sans text-[10px]">
-            <span className="text-success">+{file.additions}</span>
-            <span className="text-danger">−{file.deletions}</span>
-          </span>
-        )}
-      </button>
+      <div className="flex items-center">
+        <button
+          onClick={onToggle}
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left font-mono text-[11px] hover:bg-white/[0.03] transition-colors duration-150"
+        >
+          {isOpen ? <ChevronDown size={12} strokeWidth={1.5} /> : <ChevronRight size={12} strokeWidth={1.5} />}
+          <Icon size={12} className={tone} strokeWidth={1.5} />
+          <span className={clsx("shrink-0", tone)}>{file.status}</span>
+          <span className="truncate text-fg">{path}</span>
+          {file.is_binary ? (
+            <span className="ml-auto rounded bg-white/[0.04] px-1.5 py-0.5 text-[10px] text-fg-muted">
+              binary
+            </span>
+          ) : (
+            <span className="ml-auto flex gap-1.5 font-sans text-[10px]">
+              <span className="text-success">+{file.additions}</span>
+              <span className="text-danger">−{file.deletions}</span>
+            </span>
+          )}
+        </button>
+        {trailing}
+      </div>
       {isOpen && !file.is_binary && (
         <div className="bg-bg">
           <UnifiedDiff patch={file.patch} path={path} dense />

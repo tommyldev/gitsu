@@ -5,12 +5,11 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Silver / black / white liquid-glass palette
-        // (sleek monochrome with a single sumi-vermillion seal accent)
+        // Black / steel liquid-glass palette (Linear-style monochrome)
         bg: {
-          DEFAULT: "#1c1d20",
-          panel: "#222326",
-          subtle: "#2D2F33",
+          DEFAULT: "#0b0c0e",
+          panel: "#141519",
+          subtle: "#1c1e23",
         },
         fg: {
           DEFAULT: "#F4F5F8",
@@ -21,10 +20,6 @@ export default {
           DEFAULT: "#c8cdd6",
           hover: "#e2e5ea",
           bright: "#f4f5f8",
-        },
-        seal: {
-          DEFAULT: "#c8463c",
-          soft: "rgba(200,70,60,0.85)",
         },
         success: "rgb(76 175 80 / <alpha-value>)",
         warning: "rgb(255 167 38 / <alpha-value>)",
@@ -57,7 +52,6 @@ export default {
           "sans-serif",
         ],
         mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
-        serif: ['"Noto Serif JP"', "serif"],
       },
       transitionTimingFunction: {
         glass: "cubic-bezier(0.25, 0.46, 0.45, 0.94)",

@@ -51,7 +51,7 @@ export function Home({
             {recents.map((r) => (
               <li
                 key={r.path}
-                className="group flex items-center gap-3 rounded-lg border border-white/[0.14] bg-bg-panel px-4 py-3 transition-all duration-200 ease-standard hover:border-white/[0.24] hover:bg-[#2A2C2F] hover:shadow-[0_2px_12px_rgba(0,0,0,0.2)] hover:-translate-y-px"
+                className="group flex items-center gap-3 rounded-lg border border-white/[0.14] bg-bg-panel px-4 py-3 transition-all duration-200 ease-standard hover:border-white/[0.24] hover:bg-bg-subtle hover:shadow-[0_2px_12px_rgba(0,0,0,0.2)] hover:-translate-y-px"
               >
                 <GitBranch size={16} className="text-accent shrink-0" strokeWidth={1.5} />
                 <button

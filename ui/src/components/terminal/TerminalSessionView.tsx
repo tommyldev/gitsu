@@ -18,6 +18,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import "@xterm/xterm/css/xterm.css";
 import { useTerminalStore } from "@/stores/terminal";
+import { usePrefsStore } from "@/stores/prefs";
 
 export function TerminalSessionView({ sessionId }: { sessionId: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -26,6 +27,10 @@ export function TerminalSessionView({ sessionId }: { sessionId: number }) {
   const send = useTerminalStore((s) => s.send);
   const resize = useTerminalStore((s) => s.resize);
   const setSerializedState = useTerminalStore((s) => s.setSerializedState);
+  // Read the current font size from prefs at mount time. We also
+  // subscribe below (effect on `fontSize`) so user-driven changes
+  // (⌘= / ⌘- / ⌘0) propagate to every live xterm without remounting.
+  const fontSize = usePrefsStore((s) => s.terminalFontSize);
   // True once anything has been written to this xterm on the
   // current mount (restored state, pending bytes, or live output).
   // We only snapshot the visual state if there's something worth
@@ -41,10 +46,10 @@ export function TerminalSessionView({ sessionId }: { sessionId: number }) {
     if (!containerRef.current) return;
     const term = new Terminal({
       fontFamily: 'ui-monospace, "JetBrains Mono", SFMono-Regular, monospace',
-      fontSize: 12,
+      fontSize,
       cursorBlink: true,
       theme: {
-        background: "#1A1B1D",
+        background: "#101113",
         foreground: "#8A8F98",
         cursor: "#8A8F98",
         selectionBackground: "#3A3D44",
@@ -191,6 +196,31 @@ export function TerminalSessionView({ sessionId }: { sessionId: number }) {
       fitRef.current = null;
     };
   }, [sessionId, send, resize, setSerializedState]);
+
+  // Apply live font-size changes (⌘= / ⌘- / ⌘0) to the xterm
+  // instance in place. We deliberately do NOT remount on
+  // `fontSize` change — remounting would tear down the xterm,
+  // dispose its DOM, and lose the in-memory scrollback buffer
+  // (the saved serialized state is restored on next mount, but
+  // any unflushed TUI app state — alternate screen, etc. — would
+  // be clobbered the same way worktree switches used to be).
+  // `term.options.fontSize = …` is the cheap path: it just
+  // re-measures the canvas. We then `fit.fit()` to re-derive
+  // cols/rows from the new cell metrics and push the new size to
+  // the backend PTY so the shell knows about it.
+  useEffect(() => {
+    const term = termRef.current;
+    const fit = fitRef.current;
+    if (!term || !fit) return;
+    try {
+      term.options.fontSize = fontSize;
+      fit.fit();
+      resize(sessionId, term.cols, term.rows);
+    } catch {
+      // ignore — fit can throw on a hidden (0×0) container;
+      // the ResizeObserver handles the real fit when it resurfaces.
+    }
+  }, [fontSize, sessionId, resize]);
 
   // Overlay for terminal states (exited / error) — live status comes
   // from the store; we re-read it here so the overlay updates when

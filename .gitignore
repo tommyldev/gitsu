@@ -30,3 +30,4 @@ src-tauri/binaries/wt-*-unknown-linux-gnu.exe
 # Local env
 .env
 .env.local
+

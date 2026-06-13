@@ -695,6 +695,73 @@ pub async fn git_stash_pop(worktree: PathBuf) -> Result<crate::git::ops::StashPo
         .map_err(|e| Error::Internal(format!("git_stash_pop task: {e}")))?
 }
 
+// ── Commit composer: status / stage / unstage / commit / checkout ─
+
+/// Per-path index + worktree status for the commit composer panel.
+#[tauri::command]
+pub async fn git_status_list(worktree: PathBuf) -> Result<Vec<crate::git::stage::StatusEntry>> {
+    tokio::task::spawn_blocking(move || crate::git::stage::status_list(&worktree))
+        .await
+        .map_err(|e| Error::Internal(format!("git_status_list task: {e}")))?
+}
+
+/// Stage one path (handles deletions too).
+#[tauri::command]
+pub async fn git_stage(worktree: PathBuf, path: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || crate::git::stage::stage_path(&worktree, &path))
+        .await
+        .map_err(|e| Error::Internal(format!("git_stage task: {e}")))?
+}
+
+/// Unstage one path (reset index entry back to HEAD).
+#[tauri::command]
+pub async fn git_unstage(worktree: PathBuf, path: String) -> Result<()> {
+    tokio::task::spawn_blocking(move || crate::git::stage::unstage_path(&worktree, &path))
+        .await
+        .map_err(|e| Error::Internal(format!("git_unstage task: {e}")))?
+}
+
+/// Stage everything (`git add -A`).
+#[tauri::command]
+pub async fn git_stage_all(worktree: PathBuf) -> Result<()> {
+    tokio::task::spawn_blocking(move || crate::git::stage::stage_all(&worktree))
+        .await
+        .map_err(|e| Error::Internal(format!("git_stage_all task: {e}")))?
+}
+
+/// Unstage everything currently staged.
+#[tauri::command]
+pub async fn git_unstage_all(worktree: PathBuf) -> Result<()> {
+    tokio::task::spawn_blocking(move || crate::git::stage::unstage_all(&worktree))
+        .await
+        .map_err(|e| Error::Internal(format!("git_unstage_all task: {e}")))?
+}
+
+/// Commit the index (`git commit -m <message>`). Refuses empty
+/// messages and an empty staging area.
+#[tauri::command]
+pub async fn git_commit(
+    worktree: PathBuf,
+    message: String,
+) -> Result<crate::git::stage::CommitResult> {
+    tokio::task::spawn_blocking(move || crate::git::stage::commit(&worktree, &message))
+        .await
+        .map_err(|e| Error::Internal(format!("git_commit task: {e}")))?
+}
+
+/// Check out a commit in the current worktree, detaching HEAD.
+/// Safe-mode: aborts (with a clear error) when local changes would
+/// be clobbered.
+#[tauri::command]
+pub async fn git_checkout_commit(
+    worktree: PathBuf,
+    sha: String,
+) -> Result<crate::git::checkout::CheckoutResult> {
+    tokio::task::spawn_blocking(move || crate::git::checkout::checkout_commit(&worktree, &sha))
+        .await
+        .map_err(|e| Error::Internal(format!("git_checkout_commit task: {e}")))?
+}
+
 #[derive(Serialize)]
 pub struct RecentRepo {
     pub path: PathBuf,

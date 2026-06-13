@@ -1,17 +1,16 @@
 /**
  * Working-tree pseudo-row (uncommitted changes) for the commit graph.
  *
- * Visual placeholder for the worktree's uncommitted state. Renders
- * below the head commit, in the head's lane, with a hollow ring (vs.
- * filled circles for real commits) and a `+N −M` line-count summary
- * (or a change-count fallback when libgit2 hasn't given us a diff
- * stat yet).
+ * The pending node for the worktree's *next* commit. Renders below
+ * the head commit, in the head's lane, with a dashed hollow ring (vs.
+ * filled circles for real commits) and a `+N −M` line-count summary.
  *
- * Why a hollow ring? It's a common convention (Sublime Merge, Git
- * Graph extension) — the empty interior reads as "this isn't a real
- * commit yet, it's a placeholder for the next one". The dotted
- * connector and track line reinforce that the working tree is
- * "ephemeral" — present, but not part of the permanent history.
+ * The ring's interior fills with the lane color as the user stages
+ * files in the commit composer (`stagedRatio` 0 → 1); at 1 the dash
+ * becomes a solid stroke — "ready to commit". Committing replaces
+ * this row with the real (solid) head commit on the next graph fetch.
+ *
+ * Clicking anywhere in the row focuses the composer's message box.
  */
 
 import type { WorkingTree } from "@/lib/types";
@@ -23,12 +22,19 @@ export function WorkingTreeRow({
   y,
   labelX,
   messageX,
+  totalWidth,
+  stagedRatio,
+  onClick,
 }: {
   workingTree: WorkingTree;
   lane: number;
   y: number;
   labelX: number;
   messageX: number;
+  totalWidth: number;
+  /** Fraction (0–1) of changed paths that are fully staged. */
+  stagedRatio: number;
+  onClick: () => void;
 }) {
   const cx = laneX(lane);
   const color = LANE_COLORS[lane % LANE_COLORS.length];
@@ -58,11 +64,21 @@ export function WorkingTreeRow({
   // (left labels, then node circle, then right text) is consistent.
   const labelText = "Working tree";
   const labelW = Math.max(48, labelText.length * 6.2 + 16);
+  const ratio = Math.min(1, Math.max(0, stagedRatio));
 
   return (
-    <g style={{ pointerEvents: "none" }}>
-      {/* Selection-style row background is intentionally omitted —
-          the working-tree row isn't selectable in v1. */}
+    <g onClick={onClick} style={{ cursor: "pointer" }}>
+      {/* Row-wide hit target so the whole row is clickable, not just
+          the tiny ring. */}
+      <rect
+        x={0}
+        y={y}
+        width={totalWidth}
+        height={WORKING_TREE_ROW_HEIGHT}
+        fill="transparent"
+      >
+        <title>Click to write a commit message</title>
+      </rect>
       {/* Dotted connector from label column to node (mirrors the
           style used by real branches but uses a neutral stroke so it
           doesn't compete with the lane color). */}
@@ -77,21 +93,27 @@ export function WorkingTreeRow({
         opacity={0.9}
       />
 
-      {/* Dotted ring — the "uncommitted changes attached to HEAD"
-          cue. Uses a dashed stroke (matching the connector/track dash
-          pattern elsewhere) so the empty interior reads as "not a
-          real commit yet". No inner fill: the dashed stroke is the
-          indicator on its own, and a solid dot would compete with
-          the dotted language. */}
+      {/* Pending ring — dashed while changes are unstaged; the inner
+          disc grows with staging progress and the stroke turns solid
+          at 100% staged ("ready to commit"). */}
       <circle
         cx={cx}
         cy={midY}
         r={CIRCLE_R + 1}
-        fill="#1A1B1D"
+        fill="#101113"
         stroke={color}
         strokeWidth={1.5}
-        strokeDasharray="2,2"
+        strokeDasharray={ratio >= 1 ? undefined : "2,2"}
       />
+      {ratio > 0 && (
+        <circle
+          cx={cx}
+          cy={midY}
+          r={Math.max(1, (CIRCLE_R - 0.5) * ratio)}
+          fill={color}
+          style={{ transition: "r 250ms cubic-bezier(0.25, 0.1, 0.25, 1.0)" }}
+        />
+      )}
 
       {/* Label pill — uses a neutral muted style so it doesn't get
           confused with a real local branch. */}

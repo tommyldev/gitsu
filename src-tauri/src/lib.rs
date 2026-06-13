@@ -136,6 +136,14 @@ pub fn run() {
             ipc::git_branch_create,
             ipc::git_stash_push,
             ipc::git_stash_pop,
+            // ── commit composer (status / stage / commit / checkout) ────
+            ipc::git_status_list,
+            ipc::git_stage,
+            ipc::git_unstage,
+            ipc::git_stage_all,
+            ipc::git_unstage_all,
+            ipc::git_commit,
+            ipc::git_checkout_commit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -29,6 +29,9 @@ import type {
   BranchCreateResult,
   StashPushResult,
   StashPopResult,
+  StatusEntry,
+  CommitResult,
+  CheckoutResult,
   PtyInfo,
 } from "@/lib/types";
 
@@ -156,6 +159,28 @@ export const gitStashPush = (worktree: string, message?: string | null) =>
 
 export const gitStashPop = (worktree: string) =>
   invoke<StashPopResult>("git_stash_pop", { worktree });
+
+// ── Commit composer: status / stage / unstage / commit / checkout ─
+
+export const gitStatusList = (worktree: string) =>
+  invoke<StatusEntry[]>("git_status_list", { worktree });
+
+export const gitStage = (worktree: string, path: string) =>
+  invoke<void>("git_stage", { worktree, path });
+
+export const gitUnstage = (worktree: string, path: string) =>
+  invoke<void>("git_unstage", { worktree, path });
+
+export const gitStageAll = (worktree: string) => invoke<void>("git_stage_all", { worktree });
+
+export const gitUnstageAll = (worktree: string) =>
+  invoke<void>("git_unstage_all", { worktree });
+
+export const gitCommit = (worktree: string, message: string) =>
+  invoke<CommitResult>("git_commit", { worktree, message });
+
+export const gitCheckoutCommit = (worktree: string, sha: string) =>
+  invoke<CheckoutResult>("git_checkout_commit", { worktree, sha });
 
 // ── Per-worktree PTY (M5) ───────────────────────────────────────
 

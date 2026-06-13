@@ -4,7 +4,9 @@
  *
  * Modes:
  *   - "commit": shows a commit's metadata + file list + diff
- *   - "workdir": shows the working tree's file list + diff
+ *   - "workdir": shows the working tree's file list + diff, with
+ *     per-file stage/unstage toggles and Stage all / Unstage all
+ *     (the commit itself happens in the left-pane CommitComposer)
  *
  * When the user clicks a file, the panel swaps to a dedicated
  * "file focus" view that takes over the entire right pane. A back
@@ -24,6 +26,8 @@ import type { FileDiff } from "@/lib/types";
 import { DiffViewer } from "./DiffViewer";
 import { CommitHeader } from "./CommitHeader";
 import { useFileViewerStore } from "@/stores/fileViewer";
+import { useStagingSync } from "@/hooks/useStagingSync";
+import { WorkdirStagingBar, StageFileButton } from "./WorkdirStagingControls";
 type Mode = "commit" | "workdir";
 
 export function CommitPanel() {
@@ -33,6 +37,10 @@ export function CommitPanel() {
   const [files, setFiles] = useState<FileDiff[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Keep the staging store fresh so the per-file stage toggles in
+  // workdir mode reflect reality even when the left composer is
+  // hidden (⌘B). Deduped — the composer/graph share the same fetch.
+  useStagingSync();
 
   const node = useMemo(
     () => graph?.nodes.find((n) => n.sha === selectedSha),
@@ -130,14 +138,7 @@ export function CommitPanel() {
           />
         ) : null}
 
-        {mode === "workdir" && (
-          <div className="border-b border-white/[0.06] px-4 py-2 text-[13px]">
-            <span className="font-medium text-fg">Uncommitted changes</span>
-            <p className="text-[11px] text-fg-muted">
-              Showing staged + unstaged + untracked files in the working tree.
-            </p>
-          </div>
-        )}
+        {mode === "workdir" && <WorkdirStagingBar />}
 
         {loading ? (
           <div className="flex items-center justify-center p-6 text-fg-muted">
@@ -149,6 +150,14 @@ export function CommitPanel() {
             worktree={repo?.path ?? ""}
             files={files}
             loading={false}
+            trailing={
+              mode === "workdir"
+                ? (f) => {
+                    const path = f.new_path ?? f.old_path;
+                    return path ? <StageFileButton path={path} /> : null;
+                  }
+                : undefined
+            }
             onFileClick={(f) =>
               useFileViewerStore
                 .getState()

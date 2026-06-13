@@ -13,9 +13,11 @@
 #![allow(dead_code)]
 
 pub mod blame;
+pub mod checkout;
 pub mod conflict;
 pub mod diff;
 pub mod graph;
 pub mod merge;
 pub mod ops;
+pub mod stage;
 pub mod status;

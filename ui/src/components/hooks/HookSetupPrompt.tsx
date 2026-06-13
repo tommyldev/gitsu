@@ -28,8 +28,8 @@ export function HookSetupPrompt() {
   if (snapshot.has_post_start_copy_ignored) return null;
 
   return (
-    <div className="banner-seal mx-3 mt-3">
-      <Package size={18} className="mt-0.5 shrink-0 text-seal" strokeWidth={1.5} />
+    <div className="banner-info mx-3 mt-3">
+      <Package size={18} className="mt-0.5 shrink-0 text-accent" strokeWidth={1.5} />
       <div className="flex-1">
         <p className="font-medium text-fg">
           Bring over <code className="font-mono">.env</code> &amp; build caches into new worktrees?

@@ -14,6 +14,7 @@ import { useFileViewerStore } from "@/stores/fileViewer";
 import { WorktreeList } from "@/components/worktree/WorktreeList";
 import { CommitGraph } from "@/components/graph/CommitGraph";
 import { CommitPanel } from "@/components/commit/CommitPanel";
+import { CommitComposer } from "@/components/commit/CommitComposer";
 import { FileFocus } from "@/components/commit/FileFocus";
 import { TerminalStrip } from "@/components/terminal/TerminalStrip";
 import { DirectoryExplorer } from "@/components/directory/DirectoryExplorer";
@@ -60,44 +61,104 @@ export function Dashboard({
           onResize={onLeftResize}
           side="right"
         >
-          <WorktreeList
-            onRemove={onRemoveWorktree}
-            onSelect={(wt) => {
-              if (wt.path) {
-                void useGraphStore.getState().setActive(wt.path);
-                useTerminalStore.getState().setSelectedWorktree(wt.path);
-              }
-            }}
-            onMerge={(wt) => {
-              if (wt.is_main) return;
-              if (!wt.branch || !wt.path) return;
-              const target = useRepoStore.getState().worktrees?.default_branch ?? "main";
-              useMergeStore.getState().open(wt.path, wt.branch, target);
-            }}
-          />
+          <div className="flex h-full flex-col">
+            <div className="min-h-0 flex-1">
+              <WorktreeList
+                onRemove={onRemoveWorktree}
+                onSelect={(wt) => {
+                  if (wt.path) {
+                    void useGraphStore.getState().setActive(wt.path);
+                    useTerminalStore.getState().setSelectedWorktree(wt.path);
+                  }
+                }}
+                onMerge={(wt) => {
+                  if (wt.is_main) return;
+                  if (!wt.branch || !wt.path) return;
+                  const target = useRepoStore.getState().worktrees?.default_branch ?? "main";
+                  useMergeStore.getState().open(wt.path, wt.branch, target);
+                }}
+              />
+            </div>
+          </div>
         </ResizablePane>
       )}
 
-      {/* Right area: main content stacked above the terminal strip.
-          The flex-col wrapper keeps the terminal always mounted —
-          in graph mode it sits at the bottom as a fixed-height
-          panel, and in terminal mode it fills the available
-          vertical space. This avoids the mount/unmount cycle that
-          was destroying xterm instances and losing scrollback when
-          the user toggled between views. */}
+      {/* Right area: graph content stacked above the terminal strip.
+          Both are always rendered — we use `display: none` rather
+          than conditional rendering to hide the graph content in
+          terminal mode. This keeps the TerminalStrip as a SINGLE
+          React element that never unmounts, which is critical for
+          CLI tools with TUIs (opencode, agent harnesses, etc.) that
+          maintain internal state inside the xterm instance. The
+          serialize/restore cycle works for plain text scrollback,
+          but TUI state (curses buffers, alternate screen, etc.)
+          cannot survive an unmount. */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Top section: either the terminal (filling available) +
-            directory explorer, or the commit graph + commit panel. */}
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Graph content — hidden in terminal mode via display:none.
+            The flex-basis is 0% when hidden, 100% when visible, so
+            the flex container's space allocation is correct. */}
+        <div
+          className="flex overflow-hidden"
+          style={{
+            display: hideGraphPanel ? "none" : "flex",
+            flex: hideGraphPanel ? "0 0 0%" : "1 1 0%",
+          }}
+        >
+          <div className="flex-1 overflow-hidden bg-bg">
+            {activeFile ? (
+              <FileFocus
+                file={activeFile}
+                repo={fileRepo}
+                commitSha={fileCommitSha}
+                onBack={closeFile}
+              />
+            ) : (
+              <CommitGraph />
+            )}
+          </div>
+          {/* Right pane: staging / commit composer — toggleable via ⌘⌥B. */}
+          {!hideCommitPanel && (
+            <ResizablePane
+              width={rightWidth}
+              min={RIGHT_PANE_MIN}
+              max={RIGHT_PANE_MAX}
+              onResize={onRightResize}
+              side="left"
+            >
+              <CommitComposer />
+            </ResizablePane>
+          )}
+        </div>
+
+        {/* Terminal + optional directory explorer — hidden entirely
+            in graph mode (per design: graph view is graph + commit
+            panel only; the terminal lives in "compact" / terminal
+            mode toggled by Hide graph). We use `display: none`
+            rather than conditional rendering so the TerminalStrip
+            (and its live xterm instances) stay mounted across the
+            mode switch — the same trade-off the graph subtree
+            makes above, and the same reason the file viewer's
+            `activeFile` state survives. TUI apps inside the
+            terminal (opencode, agent harnesses, etc.) keep their
+            alternate-screen / cursor state when the user toggles
+            back. */}
+        <div
+          className="flex overflow-hidden"
+          style={{
+            display: hideGraphPanel ? "flex" : "none",
+            flex: hideGraphPanel ? "1 1 0%" : "0 0 0%",
+          }}
+        >
+          <TerminalStrip fillsAvailable={hideGraphPanel} />
+          {/* The right pane is mode-aware: in graph mode it's the
+              commit panel (controlled by `hideCommitPanel`), in
+              terminal mode it's the file explorer (also controlled
+              by `hideCommitPanel`, so the right toggle in the
+              Header — and its ⌘⌥B hotkey — toggles whichever is
+              currently shown). This is what the Header's right-
+              toggle title already implies (see Header.tsx). */}
           {hideGraphPanel ? (
-            <>
-              <TerminalStrip fillsAvailable />
-              {/* Right pane: directory explorer. In terminal view
-                  the commit panel is replaced by a file tree
-                  rooted at the focused terminal's CWD. The
-                  explorer is always visible — ⌘⌥B is not
-                  relevant here since the two sidebars serve
-                  different "modes" (graph vs terminal). */}
+            !hideCommitPanel && (
               <ResizablePane
                 width={rightWidth}
                 min={RIGHT_PANE_MIN}
@@ -107,42 +168,21 @@ export function Dashboard({
               >
                 <DirectoryExplorer />
               </ResizablePane>
-            </>
+            )
           ) : (
-            <>
-              <div className="flex-1 overflow-hidden bg-bg">
-                {activeFile ? (
-                  <FileFocus
-                    file={activeFile}
-                    repo={fileRepo}
-                    commitSha={fileCommitSha}
-                    onBack={closeFile}
-                  />
-                ) : (
-                  <CommitGraph />
-                )}
-              </div>
-              {/* Right pane: commit panel — toggleable via ⌘⌥B. */}
-              {!hideCommitPanel && (
-                <ResizablePane
-                  width={rightWidth}
-                  min={RIGHT_PANE_MIN}
-                  max={RIGHT_PANE_MAX}
-                  onResize={onRightResize}
-                  side="left"
-                >
-                  <CommitPanel />
-                </ResizablePane>
-              )}
-            </>
+            !hideCommitPanel && (
+              <ResizablePane
+                width={rightWidth}
+                min={RIGHT_PANE_MIN}
+                max={RIGHT_PANE_MAX}
+                onResize={onRightResize}
+                side="left"
+              >
+                <CommitPanel />
+              </ResizablePane>
+            )
           )}
         </div>
-
-        {/* Bottom section: terminal strip — only rendered in graph
-            mode as a fixed-height panel. In terminal mode the
-            terminal is already in the top section (fillsAvailable),
-            so we skip it here to avoid a double render. */}
-        {!hideGraphPanel && <TerminalStrip fillsAvailable={false} />}
       </div>
     </div>
   );

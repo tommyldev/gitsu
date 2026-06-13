@@ -143,38 +143,8 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col app-shell">
-      {/* Drifting silver aurora behind the app (z:0).
-          Three radial-gradient blooms drift slowly with
-          mix-blend-mode: screen. Respects prefers-reduced-motion. */}
-      <div className="aurora" aria-hidden="true">
-        <div className="bloom" />
-      </div>
-
-      {/* Zen watermark: ensō brush ring + giant 柔 kanji.
-          Sits between the aurora and the panels. */}
-      <div className="zen" aria-hidden="true">
-        <svg
-          className="enso"
-          viewBox="0 0 100 100"
-          fill="none"
-        >
-          <path
-            d="M 64 9 A 44 44 0 1 1 40 11"
-            stroke="white"
-            strokeWidth="4.5"
-            strokeLinecap="round"
-          />
-          <path
-            d="M 64 9 A 44 44 0 1 1 40 11"
-            stroke="white"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            opacity="0.5"
-            transform="translate(0.6 0.4)"
-          />
-        </svg>
-        <div className="kanji-mark">柔</div>
-      </div>
+      {/* Static near-black steel backdrop behind the glass panels. */}
+      <div className="backdrop" aria-hidden="true" />
 
       <Header
         repo={repo}

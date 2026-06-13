@@ -43,6 +43,8 @@ export function useGlobalHotkeys({
   const setSelectedTerminalWorktree = useTerminalStore((s) => s.setSelectedWorktree);
   const toggleHideWorktreeList = usePrefsStore((s) => s.toggleHideWorktreeList);
   const toggleHideCommitPanel = usePrefsStore((s) => s.toggleHideCommitPanel);
+  const bumpTerminalFontSize = usePrefsStore((s) => s.bumpTerminalFontSize);
+  const resetTerminalFontSize = usePrefsStore((s) => s.resetTerminalFontSize);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -263,6 +265,28 @@ export function useGlobalHotkeys({
           term.equalizeSplits(wt);
           return;
         }
+        // Terminal font size. `⌘+` arrives as `e.key === "="` with
+        // shift held on US layouts; we accept it on either shift
+        // state so non-US layouts (where `+` is the unshifted key)
+        // work too. `⌘0` resets to the default 12px. We don't gate
+        // on repo-open-ness for the font-size shortcuts — the
+        // `inEditable` guard above already covers the typing case,
+        // and the prefs store accepts writes regardless.
+        if (mod && e.altKey === false && e.key === "=") {
+          e.preventDefault();
+          bumpTerminalFontSize(1);
+          return;
+        }
+        if (mod && e.altKey === false && e.key === "-") {
+          e.preventDefault();
+          bumpTerminalFontSize(-1);
+          return;
+        }
+        if (mod && e.altKey === false && e.key === "0") {
+          e.preventDefault();
+          resetTerminalFontSize();
+          return;
+        }
       }
 
       // ── Window-level (always allowed, repo or not)
@@ -322,6 +346,8 @@ export function useGlobalHotkeys({
     refresh,
     toggleHideWorktreeList,
     toggleHideCommitPanel,
+    bumpTerminalFontSize,
+    resetTerminalFontSize,
     setCreateOpen,
     setRemoveTarget,
     setHooksManagerOpen,

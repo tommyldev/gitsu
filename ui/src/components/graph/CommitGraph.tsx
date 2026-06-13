@@ -25,7 +25,8 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useGraphStore } from "@/stores/graph";
-import { useRepoStore } from "@/stores/repo";
+import { useStagingStore, stagedRatio } from "@/stores/staging";
+import { useStagingSync } from "@/hooks/useStagingSync";
 import { AlertCircle } from "lucide-react";
 import { CommitContextMenu, type CommitMenuTarget } from "./CommitContextMenu";
 import { GitActionsBar } from "./GitActionsBar";
@@ -49,33 +50,17 @@ import {
 } from "./graph-geometry";
 
 export function CommitGraph() {
-  const { graph, layout, loading, error, selectedSha, select, fetchedFor, activePath } = useGraphStore();
-  // We subscribe to the whole worktree list here so the working-tree
-  // row updates as the 3s poll brings fresh `working_tree` data.
-  // The re-render is cheap — the SVG only re-runs the diff for the
-  // one row that changed.
-  const worktrees = useRepoStore((s) => s.worktrees);
+  const { graph, layout, loading, error, selectedSha, select, fetchedFor } = useGraphStore();
   const [menu, setMenu] = useState<CommitMenuTarget | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastScrolledFor = useRef<string | null>(null);
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  // Compute the working-tree state for the *active* worktree (the
-  // one the graph was fetched for). We look it up by path because the
-  // worktree list and the graph are addressed separately. If the
-  // active worktree isn't in the list yet (e.g. graph loaded first
-  // after a worktree switch), we just don't show the working-tree row
-  // until the next poll lands.
-  const activeWorktree = worktrees?.items.find((w) => w.path === activePath);
-  const workingTree = activeWorktree?.working_tree ?? null;
-  const hasUncommitted = !!workingTree && (
-    workingTree.staged ||
-    workingTree.modified ||
-    workingTree.untracked ||
-    workingTree.renamed ||
-    workingTree.deleted
-  );
+  // Keep the staging store in sync with the active worktree — the
+  // pending node's fill tracks composer staging progress live.
+  const { workingTree, hasUncommitted } = useStagingSync();
+  const stagingEntries = useStagingStore((s) => s.entries);
   // When the working-tree row is visible, the rest of the graph shifts
   // down by one row so the head commit stays anchored at the same
   // scroll position.
@@ -268,6 +253,9 @@ export function CommitGraph() {
               y={0}
               labelX={labelX}
               messageX={messageX}
+              totalWidth={totalWidth}
+              stagedRatio={stagedRatio(stagingEntries)}
+              onClick={() => useStagingStore.getState().requestFocus()}
             />
           )}
         </svg>
