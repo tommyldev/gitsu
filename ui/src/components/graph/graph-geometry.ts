@@ -55,3 +55,38 @@ export function layoutRowIndexBySha(rows: LayoutRow[]): Map<string, number> {
   for (let i = 0; i < rows.length; i++) m.set(rows[i].sha, i);
   return m;
 }
+
+/**
+ * Compute the y position of a commit row in the graph SVG.
+ *
+ * Rows at or below the HEAD row shift down by WORKING_TREE_ROW_HEIGHT
+ * to make room for the pending node (which sits right above the HEAD
+ * commit). Rows above the HEAD row are unaffected.
+ *
+ * When there are no uncommitted changes, no shift is applied.
+ *
+ * @param index     Row index in the layout (0 = newest commit).
+ * @param headIndex Row index of the worktree's HEAD commit.
+ *                  -1 means no HEAD found (all rows shift uniformly).
+ * @param hasPending Whether the working-tree row is present.
+ */
+export function rowY(index: number, headIndex: number, hasPending: boolean): number {
+  if (!hasPending) return index * ROW_HEIGHT;
+  // If we can't locate HEAD, fall back to the old uniform shift
+  // (pending node above row 0, all rows shifted down).
+  if (headIndex < 0) return index * ROW_HEIGHT + WORKING_TREE_ROW_HEIGHT;
+  // Rows at or below HEAD shift down (they're below the pending node).
+  // Rows above HEAD stay at their natural position.
+  const shift = index >= headIndex ? WORKING_TREE_ROW_HEIGHT : 0;
+  return index * ROW_HEIGHT + shift;
+}
+
+/**
+ * Y position of the working-tree (pending) pseudo-row.
+ * It sits right above the HEAD commit, in the HEAD's lane.
+ * When HEAD is at row 0, this is y=0 (top of graph).
+ */
+export function pendingRowY(headIndex: number): number {
+  if (headIndex < 0) return 0;
+  return headIndex * ROW_HEIGHT;
+}

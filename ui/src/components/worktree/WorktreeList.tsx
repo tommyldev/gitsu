@@ -181,7 +181,7 @@ function WorktreeRow({
                     e.stopPropagation();
                     onMerge(wt);
                   }}
-                  title={`Merge ${branchLabel} into default`}
+                  title={`Finish ${branchLabel}`}
                 >
                   <GitMerge size={12} strokeWidth={1.5} />
                 </button>

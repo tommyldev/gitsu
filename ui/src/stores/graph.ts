@@ -34,7 +34,7 @@ interface GraphState {
   /** Alias kept for backwards compat with existing readers. */
   fetchedFor: string | null;
 
-  fetch: (worktreePath: string) => Promise<void>;
+  fetch: (worktreePath: string, opts?: { force?: boolean }) => Promise<void>;
   /**
    * Switch the active worktree. Triggers a graph fetch for the new
    * path; clears the selected commit (the new graph starts on HEAD).
@@ -57,9 +57,11 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   activePath: null,
   fetchedFor: null,
 
-  fetch: async (worktreePath: string) => {
-    // If the worktree hasn't changed and we have data, skip.
-    if (get().fetchedFor === worktreePath && get().graph) return;
+  fetch: async (worktreePath: string, opts?: { force?: boolean }) => {
+    // If the worktree hasn't changed and we have data, skip. Callers
+    // that need a re-fetch on the same worktree (e.g. after a commit
+    // that produced a new HEAD) pass `{ force: true }`.
+    if (!opts?.force && get().fetchedFor === worktreePath && get().graph) return;
     set({ loading: true, error: null });
     try {
       const graph = await graphBuild(worktreePath, null, MAX_COMMITS);

@@ -7,7 +7,13 @@ import { useMergeStore } from "@/stores/merge";
 import { useTerminalStore } from "@/stores/terminal";
 import clsx from "clsx";
 
-export function Footer({ onMerge }: { onMerge: () => void }) {
+export function Footer({
+  onFinish,
+  onFinishKeepWorktree,
+}: {
+  onFinish: () => void;
+  onFinishKeepWorktree: () => void;
+}) {
   const phase = useMergeStore((s) => s.phase);
   const preview = useMergeStore((s) => s.preview);
   const result = useMergeStore((s) => s.result);
@@ -54,13 +60,22 @@ export function Footer({ onMerge }: { onMerge: () => void }) {
           {phase === "done" ? "Close" : "Cancel"}
         </button>
         {phase === "ready" && (
-          <button
-            onClick={onMerge}
-            disabled={!canMerge}
-            className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] text-white hover:bg-accent-hover disabled:opacity-50 transition-colors duration-150"
-          >
-            <GitMerge size={11} strokeWidth={1.5} /> Merge
-          </button>
+          <>
+            <button
+              onClick={onFinishKeepWorktree}
+              disabled={!canMerge}
+              className="rounded-md border border-white/[0.08] bg-bg px-3 py-1.5 text-[11px] text-fg-muted hover:border-white/[0.12] hover:text-fg disabled:opacity-50 transition-colors duration-150"
+            >
+              Finish &amp; keep worktree
+            </button>
+            <button
+              onClick={onFinish}
+              disabled={!canMerge}
+              className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[11px] text-white hover:bg-accent-hover disabled:opacity-50 transition-colors duration-150"
+            >
+              <GitMerge size={11} strokeWidth={1.5} /> Finish feature
+            </button>
+          </>
         )}
       </div>
     </footer>

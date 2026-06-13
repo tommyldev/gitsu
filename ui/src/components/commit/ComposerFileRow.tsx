@@ -1,6 +1,8 @@
 /**
  * One file row in the commit composer: change-kind letter, path,
  * and a hover action that moves the path in/out of the index.
+ *
+ * Supports multi-select via shift-click and right-click context menu.
  */
 
 import { Plus, Minus } from "lucide-react";
@@ -32,6 +34,9 @@ export function ComposerFileRow({
   side,
   onToggle,
   disabled,
+  selected,
+  onRightClick,
+  onShiftClick,
 }: {
   entry: StatusEntry;
   /** Which half of the panel the row lives in — decides which kind
@@ -39,6 +44,9 @@ export function ComposerFileRow({
   side: "staged" | "unstaged";
   onToggle: () => void;
   disabled: boolean;
+  selected?: boolean;
+  onRightClick?: (e: React.MouseEvent) => void;
+  onShiftClick?: () => void;
 }) {
   const kind = (side === "staged" ? entry.staged : entry.unstaged) as ChangeKind;
   const slash = entry.path.lastIndexOf("/");
@@ -46,10 +54,28 @@ export function ComposerFileRow({
   const name = slash >= 0 ? entry.path.slice(slash + 1) : entry.path;
   const stageAction = side === "unstaged";
 
+  const handleClick = (e: React.MouseEvent) => {
+    if (e.shiftKey) {
+      e.preventDefault();
+      onShiftClick?.();
+    } else {
+      onToggle();
+    }
+  };
+
   return (
     <li
-      className="group flex min-w-0 items-center gap-2 rounded-md px-2 py-1 hover:bg-white/[0.04] transition-colors duration-150"
+      className={clsx(
+        "group flex min-w-0 items-center gap-2 rounded-md px-2 py-1 transition-colors duration-150",
+        selected
+          ? "bg-accent/15 hover:bg-accent/20"
+          : "hover:bg-white/[0.04]",
+      )}
       title={entry.path}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onRightClick?.(e);
+      }}
     >
       <span
         className={clsx(
@@ -61,7 +87,7 @@ export function ComposerFileRow({
       </span>
       <button
         className="flex min-w-0 flex-1 items-baseline text-left text-[12px]"
-        onClick={onToggle}
+        onClick={handleClick}
         disabled={disabled}
         title={stageAction ? `Stage ${entry.path}` : `Unstage ${entry.path}`}
       >

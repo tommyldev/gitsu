@@ -39,6 +39,11 @@ interface StagingState {
   /** Bumped when the pending graph node is clicked — the composer
    *  focuses its message box in response. */
   focusToken: number;
+  /** Bumped when the user clicks the pending working-tree row in
+   *  the graph. The composer uses this to switch from the commit-
+   *  inspect view back to the staging UI, in addition to focusing
+   *  the message box. */
+  workdirToken: number;
 
   fetch: (worktree: string) => Promise<void>;
   stage: (path: string) => Promise<void>;
@@ -49,6 +54,10 @@ interface StagingState {
   /** Commit the index. Returns true on success. */
   commit: () => Promise<boolean>;
   requestFocus: () => void;
+  /** Pending working-tree row in the graph was clicked: focus the
+   *  message box AND signal the composer to switch back to the
+   *  staging UI. */
+  requestWorkdir: () => void;
   clear: () => void;
 }
 
@@ -75,6 +84,7 @@ export const useStagingStore = create<StagingState>((set, get) => {
     message: "",
     committing: false,
     focusToken: 0,
+    workdirToken: 0,
 
     fetch: async (worktree) => {
       // Dedupe: one in-flight status read per worktree.
@@ -109,10 +119,15 @@ export const useStagingStore = create<StagingState>((set, get) => {
         set({ message: "", error: null, committing: false });
         // Solidify the pending node: refresh the worktree poll (the
         // working-tree row disappears) and the graph (the new head
-        // commit appears as a real, filled node).
+        // commit appears as a real, filled node). The graph fetch
+        // dedupes by worktree, so we must `force: true` here — the
+        // graph store would otherwise short-circuit, `selectedSha`
+        // would stay on the (now-gone) working-tree row, and the
+        // right panel would render its blank state instead of the
+        // new HEAD's details.
         await get().fetch(worktree);
         await useRepoStore.getState().refresh();
-        await useGraphStore.getState().fetch(worktree);
+        await useGraphStore.getState().fetch(worktree, { force: true });
         return true;
       } catch (e) {
         set({ error: parseError(e), committing: false });
@@ -122,6 +137,15 @@ export const useStagingStore = create<StagingState>((set, get) => {
 
     requestFocus: () => set((s) => ({ focusToken: s.focusToken + 1 })),
 
+    /** The pending working-tree row in the graph was clicked. Bump
+     *  both tokens: `focusToken` focuses the message box, `workdirToken`
+     *  signals the composer to switch out of commit-inspect mode. */
+    requestWorkdir: () =>
+      set((s) => ({
+        focusToken: s.focusToken + 1,
+        workdirToken: s.workdirToken + 1,
+      })),
+
     clear: () =>
       set({
         worktree: null,
@@ -130,6 +154,8 @@ export const useStagingStore = create<StagingState>((set, get) => {
         error: null,
         message: "",
         committing: false,
+        focusToken: 0,
+        workdirToken: 0,
       }),
   };
 });

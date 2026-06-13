@@ -11,6 +11,7 @@ import {
   laneX,
   branchLabelWidth,
   tagLabelWidth,
+  rowY,
 } from "./graph-geometry";
 import { BranchLabel, TagLabel } from "./RefLabels";
 import { truncate, relativeTime } from "@/lib/format";
@@ -19,7 +20,8 @@ export function CommitRow({
   row,
   node,
   index,
-  yOffset,
+  headRowIndex,
+  hasPending,
   selected,
   totalWidth,
   labelX,
@@ -32,7 +34,10 @@ export function CommitRow({
   row: LayoutRow;
   node: CommitNode;
   index: number;
-  yOffset: number;
+  /** Row index of the worktree's HEAD commit. -1 if not found. */
+  headRowIndex: number;
+  /** Whether the working-tree row is present. */
+  hasPending: boolean;
   selected: boolean;
   totalWidth: number;
   labelX: number;
@@ -42,7 +47,7 @@ export function CommitRow({
   onSelect: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }) {
-  const y = index * ROW_HEIGHT + yOffset;
+  const y = rowY(index, headRowIndex, hasPending);
   const cx = laneX(row.lane);
   const color = LANE_COLORS[row.lane % LANE_COLORS.length];
   const midY = y + ROW_HEIGHT / 2;

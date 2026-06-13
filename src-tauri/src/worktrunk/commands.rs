@@ -80,6 +80,30 @@ pub struct Worktree {
     /// Examples: "+", "↑1", "⇡2", "merged".
     #[serde(default)]
     pub head_change: Option<String>,
+    /// Whether this worktree is the main/primary worktree.
+    #[serde(default)]
+    pub is_main: bool,
+    /// Whether this worktree is the currently active one.
+    #[serde(default)]
+    pub is_current: bool,
+    /// Whether this worktree was the previously active one.
+    #[serde(default)]
+    pub is_previous: bool,
+    /// Uncommitted changes summary — drives the pending graph node.
+    #[serde(default)]
+    pub working_tree: Option<WorkingTree>,
+    /// Main worktree state: "is_main", "merged", "diverged", etc.
+    #[serde(default)]
+    pub main_state: Option<String>,
+    /// Worktree metadata (detached HEAD, etc.).
+    #[serde(default, rename = "worktree")]
+    pub worktree_meta: Option<WorktreeMeta>,
+    /// ANSI-colored status line from `wt list`.
+    #[serde(default)]
+    pub statusline: Option<String>,
+    /// Compact status symbols, e.g. "^", "+", "↑1".
+    #[serde(default)]
+    pub symbols: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -298,6 +322,9 @@ pub struct MergeOpts<'a> {
     /// `--no-hooks` if set
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_hooks: Option<bool>,
+    /// `--no-remove` if set
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_remove: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,6 +346,9 @@ pub async fn merge(
     let mut args = vec!["merge", "--format=json", opts.target];
     if opts.no_hooks.unwrap_or(false) {
         args.push("--no-hooks");
+    }
+    if opts.no_remove.unwrap_or(false) {
+        args.push("--no-remove");
     }
     client.run_json(&args).await
 }
@@ -645,5 +675,54 @@ mod tests {
         assert!(results[0].kind.is_none());
         assert!(results[0].path.is_none());
         assert!(results[0].pruned.is_none());
+    }
+
+    /// A worktree with all the new fields (working_tree, is_main, etc.)
+    /// must parse correctly — these fields drive the pending graph node
+    /// and worktree list display.
+    #[test]
+    fn parses_worktree_with_working_tree_and_metadata() {
+        let json = r#"[
+            {
+                "branch": "main",
+                "path": "/home/user/repo",
+                "kind": "worktree",
+                "commit": {
+                    "sha": "abc123def456",
+                    "short_sha": "abc123d",
+                    "message": "Initial commit",
+                    "timestamp": 1700000000
+                },
+                "main_state": "is_main",
+                "worktree": { "detached": false },
+                "is_main": true,
+                "is_current": true,
+                "is_previous": false,
+                "statusline": "main",
+                "symbols": "",
+                "working_tree": {
+                    "staged": true,
+                    "modified": false,
+                    "untracked": true,
+                    "renamed": false,
+                    "deleted": false,
+                    "diff": { "added": 42, "deleted": 7 }
+                }
+            }
+        ]"#;
+        let worktrees: Vec<Worktree> = serde_json::from_str(json)
+            .expect("worktree with working_tree should parse without error");
+        assert_eq!(worktrees.len(), 1);
+        let wt = &worktrees[0];
+        assert!(wt.is_main);
+        assert!(wt.is_current);
+        assert!(!wt.is_previous);
+        let wtree = wt.working_tree.as_ref().expect("working_tree should be present");
+        assert!(wtree.staged);
+        assert!(wtree.untracked);
+        assert_eq!(wtree.diff.as_ref().unwrap().added, 42);
+        assert_eq!(wtree.diff.as_ref().unwrap().deleted, 7);
+        assert_eq!(wt.main_state.as_deref(), Some("is_main"));
+        assert!(!wt.worktree_meta.as_ref().unwrap().detached);
     }
 }

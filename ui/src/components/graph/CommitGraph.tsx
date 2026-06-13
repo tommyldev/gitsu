@@ -12,11 +12,16 @@
  *
  * When the active worktree has uncommitted changes (`Worktree.working_tree`
  * with any of staged/modified/untracked/renamed/deleted set), a
- * "working tree" pseudo-row is rendered immediately below the head
- * commit: a hollow ring, a dotted connector up to HEAD, a dotted track
- * line through the row, and a "+N −M" summary. The rest of the graph
- * is shifted down by one row height. This matches the convention in
- * Sublime Merge / GitHub Desktop / VS Code's Git Graph extension.
+ * "working tree" pseudo-row is rendered immediately above the HEAD
+ * commit: a hollow ring, a dotted connector down to HEAD, a dotted track
+ * line through the row, and a "+N −M" summary. Rows at or below HEAD
+ * shift down by one row height to accommodate it. Rows above HEAD are
+ * unaffected. This matches the convention in Sublime Merge / GitHub
+ * Desktop / VS Code's Git Graph extension.
+ *
+ * When HEAD is the newest commit (row 0), the pending node appears at
+ * the top of the graph. When HEAD is an older commit (e.g. detached
+ * HEAD at n-5), the pending node sprouts from n-5's position.
  *
  * The component is intentionally un-virtualized for v1. At 500
  * commits × 28px = 14,000px, modern browsers handle the SVG without
@@ -47,6 +52,8 @@ import {
   WORKING_TREE_ROW_HEIGHT,
   laneX,
   layoutRowIndexBySha,
+  rowY,
+  pendingRowY,
 } from "./graph-geometry";
 
 export function CommitGraph() {
@@ -61,10 +68,29 @@ export function CommitGraph() {
   // pending node's fill tracks composer staging progress live.
   const { workingTree, hasUncommitted } = useStagingSync();
   const stagingEntries = useStagingStore((s) => s.entries);
-  // When the working-tree row is visible, the rest of the graph shifts
-  // down by one row so the head commit stays anchored at the same
-  // scroll position.
-  const yOffset = hasUncommitted ? WORKING_TREE_ROW_HEIGHT : 0;
+
+  // Find the row index of the worktree's HEAD commit so the pending
+  // node sprouts from the correct position (not always row 0).
+  const headRowIndex = graph && layout
+    ? layout.rows.findIndex((r) => r.sha === graph.head_sha)
+    : -1;
+  // The lane the HEAD commit occupies.
+  const headLane = headRowIndex >= 0
+    ? layout!.rows[headRowIndex].lane
+    : (layout?.rows[0]?.lane ?? 0);
+  const headColor = LANE_COLORS[headLane % LANE_COLORS.length];
+
+  // When HEAD is at row 0 (newest commit), the pending node can
+  // share HEAD's lane — nothing is above it, so no visual confusion.
+  // When HEAD is NOT at row 0 (e.g. detached HEAD at n-5), the
+  // pending node must go on a NEW lane so it doesn't visually
+  // connect to the commits above HEAD. It forks from HEAD with a
+  // dotted Bezier curve, like a real branch would.
+  // Use headLane + 1 to keep the fork tight (right next to the
+  // main branch) rather than jumping to a far-away lane.
+  const isFork = headRowIndex > 0;
+  const pendingLane = isFork ? headLane + 1 : headLane;
+  const pendingColor = LANE_COLORS[pendingLane % LANE_COLORS.length];
 
   useEffect(() => {
     if (!layout || !graph || !containerRef.current) return;
@@ -75,7 +101,7 @@ export function CommitGraph() {
 
     const rowIndex = layout.rows.findIndex((r) => r.sha === targetSha);
     if (rowIndex >= 0) {
-      const y = rowIndex * ROW_HEIGHT + yOffset;
+      const y = rowY(rowIndex, headRowIndex, hasUncommitted);
       const container = containerRef.current;
       const halfHeight = container.clientHeight / 2;
       container.scrollTo({
@@ -84,7 +110,7 @@ export function CommitGraph() {
       });
       lastScrolledFor.current = fetchedFor;
     }
-  }, [fetchedFor, layout, graph, selectedSha, yOffset]);
+  }, [fetchedFor, layout, graph, selectedSha, headRowIndex, hasUncommitted]);
 
   if (loading && !graph) {
     return (
@@ -119,9 +145,11 @@ export function CommitGraph() {
   }
 
   // Compute the rightmost *actually used* lane so the column hugs the
-  // data instead of padding out to `layout.laneCount`.
+  // data instead of padding out to `layout.laneCount`. When the
+  // pending node is on a fork lane, include it in the width calc.
   const rightmostLane = layout.rows.reduce((max, row) => Math.max(max, row.lane), 0);
-  const graphWidth = Math.max(MIN_GRAPH_WIDTH, (rightmostLane + 1) * LANE_WIDTH + GRAPH_PAD_X * 2);
+  const effectiveMaxLane = hasUncommitted ? Math.max(rightmostLane, pendingLane) : rightmostLane;
+  const graphWidth = Math.max(MIN_GRAPH_WIDTH, (effectiveMaxLane + 1) * LANE_WIDTH + GRAPH_PAD_X * 2);
 
   // Column positions (absolute x coordinates)
   const labelX = 8; // small left padding
@@ -129,12 +157,15 @@ export function CommitGraph() {
   const dateX = authorX + COL_AUTHOR;
   const messageX = dateX + COL_DATE;
   const totalWidth = messageX + COL_MESSAGE;
-  const totalHeight = layout.rows.length * ROW_HEIGHT + 8 + yOffset;
-  // The head commit is always layout.rows[0] (newest first). Its lane
-  // is where the working-tree node lives, so the dotted connector is
-  // a straight vertical line.
-  const headLane = layout.rows[0]?.lane ?? 0;
-  const headColor = LANE_COLORS[headLane % LANE_COLORS.length];
+  // Total height includes the working-tree row when present.
+  const totalHeight = layout.rows.length * ROW_HEIGHT + 8 + (hasUncommitted ? WORKING_TREE_ROW_HEIGHT : 0);
+
+  // Y position of the pending node — sits right above HEAD.
+  const pendingY = pendingRowY(headRowIndex);
+  // Y position of the HEAD commit's midpoint (for the connector).
+  const headRowY = rowY(headRowIndex >= 0 ? headRowIndex : 0, headRowIndex, hasUncommitted);
+  const headMidY = headRowY + ROW_HEIGHT / 2;
+  const pendingMidY = pendingY + WORKING_TREE_ROW_HEIGHT / 2;
 
   return (
     <div className="flex h-full flex-col">
@@ -163,20 +194,34 @@ export function CommitGraph() {
                 key={`e-${i}-${edge.from_sha}-${edge.to_sha}`}
                 edge={edge}
                 rowIndexBySha={layoutRowIndexBySha(layout.rows)}
-                yOffset={yOffset}
+                headRowIndex={headRowIndex}
+                hasPending={hasUncommitted}
               />
             ))}
-            {/* Dotted connector from head commit down to the working-tree
-                node. Rendered with the edges so the head's solid circle
-                sits on top of it. */}
-            {hasUncommitted && workingTree && (
+            {/* Dotted connector from the working-tree node to the HEAD
+                commit. When HEAD is at row 0, it's a straight vertical
+                line (pending node is above HEAD in the same lane).
+                When HEAD is at row N > 0 (fork scenario), it's a
+                dotted Bezier curve from the pending lane to HEAD's
+                lane — visually this is a branch fork from HEAD. */}
+            {hasUncommitted && workingTree && !isFork && (
               <line
                 x1={laneX(headLane)}
-                y1={yOffset - WORKING_TREE_ROW_HEIGHT / 2}
+                y1={pendingMidY}
                 x2={laneX(headLane)}
-                y2={yOffset + ROW_HEIGHT / 2}
+                y2={headMidY}
                 stroke={headColor}
                 strokeWidth={1.5}
+                strokeDasharray="3,3"
+                opacity={0.55}
+              />
+            )}
+            {hasUncommitted && workingTree && isFork && (
+              <path
+                d={`M ${laneX(pendingLane)} ${pendingMidY} C ${laneX(pendingLane)} ${pendingMidY + (headMidY - pendingMidY) * 0.5}, ${laneX(headLane)} ${headMidY - (headMidY - pendingMidY) * 0.5}, ${laneX(headLane)} ${headMidY}`}
+                stroke={pendingColor}
+                strokeWidth={1.5}
+                fill="none"
                 strokeDasharray="3,3"
                 opacity={0.55}
               />
@@ -187,18 +232,24 @@ export function CommitGraph() {
               but a line is still passing through). Drawn before circles. */}
           <g>
             {layout.rows.map((row, i) => (
-              <TrackLines key={`t-${row.sha}`} row={row} rowIndex={i} yOffset={yOffset} />
+              <TrackLines
+                key={`t-${row.sha}`}
+                row={row}
+                rowIndex={i}
+                headRowIndex={headRowIndex}
+                hasPending={hasUncommitted}
+              />
             ))}
-            {/* Dotted track line through the working-tree row. Same
-                visual language as the connector — emphasizes that the
-                working tree is "on the way" to a future commit. */}
+            {/* Dotted track line through the working-tree row, in the
+                pending node's lane. Only spans the pending row itself
+                — no track line above it (it's a fresh branch). */}
             {hasUncommitted && (
               <line
-                x1={laneX(headLane)}
-                y1={0}
-                x2={laneX(headLane)}
-                y2={WORKING_TREE_ROW_HEIGHT}
-                stroke={headColor}
+                x1={laneX(pendingLane)}
+                y1={pendingY}
+                x2={laneX(pendingLane)}
+                y2={pendingY + WORKING_TREE_ROW_HEIGHT}
+                stroke={pendingColor}
                 strokeWidth={1.5}
                 strokeDasharray="3,3"
                 opacity={0.4}
@@ -217,7 +268,8 @@ export function CommitGraph() {
                   row={row}
                   node={node}
                   index={i}
-                  yOffset={yOffset}
+                  headRowIndex={headRowIndex}
+                  hasPending={hasUncommitted}
                   selected={selectedSha === row.sha}
                   totalWidth={totalWidth}
                   labelX={labelX}
@@ -243,19 +295,19 @@ export function CommitGraph() {
           </g>
 
           {/* Working-tree pseudo-row. Drawn last so its hollow circle sits
-              on top of the connector. The row is a "preview" of the next
-              commit; not clickable in v1 (future: select HEAD and show
-              workdir_diff in the right pane). */}
+              on top of the connector. When HEAD is at row 0, it's in the
+              HEAD's lane (vertical continuation). When HEAD is at row N > 0,
+              it forks onto its own lane with nothing above it. */}
           {hasUncommitted && workingTree && (
             <WorkingTreeRow
               workingTree={workingTree}
-              lane={headLane}
-              y={0}
+              lane={pendingLane}
+              y={pendingY}
               labelX={labelX}
               messageX={messageX}
               totalWidth={totalWidth}
               stagedRatio={stagedRatio(stagingEntries)}
-              onClick={() => useStagingStore.getState().requestFocus()}
+              onClick={() => useStagingStore.getState().requestWorkdir()}
             />
           )}
         </svg>

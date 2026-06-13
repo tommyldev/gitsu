@@ -74,8 +74,8 @@ export const wtRemove = (
   force?: boolean,
 ) => invoke<RemoveResult[]>("wt_remove", { repo, branch, deleteBranch, force });
 
-export const wtMerge = (repo: string, target: string, noHooks?: boolean) =>
-  invoke<MergeResult>("wt_merge", { repo, target, noHooks });
+export const wtMerge = (repo: string, target: string, noHooks?: boolean, noRemove?: boolean) =>
+  invoke<MergeResult>("wt_merge", { repo, target, noHooks, noRemove });
 
 export const wtStepCommit = (repo: string, stage?: string | null, dryRun?: boolean) =>
   invoke<unknown>("wt_step_commit", { repo, stage, dryRun });
@@ -181,6 +181,18 @@ export const gitCommit = (worktree: string, message: string) =>
 
 export const gitCheckoutCommit = (worktree: string, sha: string) =>
   invoke<CheckoutResult>("git_checkout_commit", { worktree, sha });
+
+export const gitDiscardPaths = (worktree: string, paths: string[]) =>
+  invoke<void>("git_discard_paths", { worktree, paths });
+
+export const gitStashPushPaths = (
+  worktree: string,
+  paths: string[],
+  message?: string | null,
+) => invoke<StashPushResult>("git_stash_push_paths", { worktree, paths, message });
+
+export const gitIgnore = (worktree: string, path: string) =>
+  invoke<string>("git_ignore", { worktree, path });
 
 // ── Per-worktree PTY (M5) ───────────────────────────────────────
 

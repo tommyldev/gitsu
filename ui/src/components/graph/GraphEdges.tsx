@@ -3,27 +3,30 @@
  */
 
 import type { LayoutEdge, LayoutRow } from "@/lib/dag";
-import { LANE_COLORS, ROW_HEIGHT, CIRCLE_R, laneX } from "./graph-geometry";
+import { LANE_COLORS, ROW_HEIGHT, CIRCLE_R, laneX, rowY } from "./graph-geometry";
 
 export function EdgeLine({
   edge,
   rowIndexBySha,
-  yOffset,
+  headRowIndex,
+  hasPending,
 }: {
   edge: LayoutEdge;
   rowIndexBySha: Map<string, number>;
-  /** Shift rows down by this many px (working-tree row height). 0 = no row. */
-  yOffset: number;
+  /** Row index of the worktree's HEAD commit. -1 if not found. */
+  headRowIndex: number;
+  /** Whether the working-tree row is present. */
+  hasPending: boolean;
 }) {
   const fromIndex = rowIndexBySha.get(edge.from_sha);
   if (fromIndex === undefined) return null;
 
   const parentIndex = rowIndexBySha.get(edge.to_sha);
-  const childY = fromIndex * ROW_HEIGHT + ROW_HEIGHT / 2 + yOffset;
+  const childY = rowY(fromIndex, headRowIndex, hasPending) + ROW_HEIGHT / 2;
   const parentY =
     parentIndex !== undefined
-      ? parentIndex * ROW_HEIGHT + ROW_HEIGHT / 2 + yOffset
-      : (fromIndex + 1) * ROW_HEIGHT + ROW_HEIGHT / 2 + yOffset;
+      ? rowY(parentIndex, headRowIndex, hasPending) + ROW_HEIGHT / 2
+      : rowY(fromIndex + 1, headRowIndex, hasPending) + ROW_HEIGHT / 2;
 
   const childX = laneX(edge.from_lane);
   const parentX = laneX(edge.to_lane);
@@ -63,20 +66,26 @@ export function EdgeLine({
 export function TrackLines({
   row,
   rowIndex,
-  yOffset,
+  headRowIndex,
+  hasPending,
 }: {
   row: LayoutRow;
   rowIndex: number;
-  yOffset: number;
+  /** Row index of the worktree's HEAD commit. -1 if not found. */
+  headRowIndex: number;
+  /** Whether the working-tree row is present. */
+  hasPending: boolean;
 }) {
   const cx = laneX(row.lane);
   const color = LANE_COLORS[row.lane % LANE_COLORS.length];
+  const y1 = rowY(rowIndex, headRowIndex, hasPending);
+  const y2 = rowY(rowIndex + 1, headRowIndex, hasPending);
   return (
     <line
       x1={cx}
-      y1={rowIndex * ROW_HEIGHT + yOffset}
+      y1={y1}
       x2={cx}
-      y2={(rowIndex + 1) * ROW_HEIGHT + yOffset}
+      y2={y2}
       stroke={color}
       strokeWidth={1.5}
       opacity={0.4}

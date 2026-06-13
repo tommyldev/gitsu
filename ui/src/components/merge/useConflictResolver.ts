@@ -10,7 +10,6 @@ import { useMergeStore } from "@/stores/merge";
 
 export function useConflictResolver() {
   const context = useMergeStore((s) => s.context);
-  const runMerge = useMergeStore((s) => s.runMerge);
 
   const [paths, setPaths] = useState<string[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -101,10 +100,10 @@ export function useConflictResolver() {
     setContent(parts.base);
   }, [parts]);
 
-  const completeMerge = useCallback(() => {
+  const complete = useCallback(() => {
     if (!context) return;
-    void runMerge(false);
-  }, [context, runMerge]);
+    void useMergeStore.getState().completeMerge({});
+  }, [context]);
 
   return {
     paths,
@@ -120,6 +119,6 @@ export function useConflictResolver() {
     useOurs,
     useTheirs,
     useBase,
-    completeMerge,
+    completeMerge: complete,
   };
 }

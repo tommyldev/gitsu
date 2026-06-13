@@ -144,6 +144,9 @@ pub fn run() {
             ipc::git_unstage_all,
             ipc::git_commit,
             ipc::git_checkout_commit,
+            ipc::git_discard_paths,
+            ipc::git_stash_push_paths,
+            ipc::git_ignore,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

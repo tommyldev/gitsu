@@ -120,6 +120,7 @@ pub async fn wt_merge(
     repo: PathBuf,
     target: String,
     no_hooks: Option<bool>,
+    no_remove: Option<bool>,
 ) -> Result<wt::MergeResult> {
     let client = wt_for(&state, &app, repo).await?;
     wt::merge(
@@ -127,6 +128,7 @@ pub async fn wt_merge(
         wt::MergeOpts {
             target: &target,
             no_hooks,
+            no_remove,
         },
     )
     .await
@@ -760,6 +762,40 @@ pub async fn git_checkout_commit(
     tokio::task::spawn_blocking(move || crate::git::checkout::checkout_commit(&worktree, &sha))
         .await
         .map_err(|e| Error::Internal(format!("git_checkout_commit task: {e}")))?
+}
+
+/// Discard working-tree changes for specific paths — restores them to HEAD.
+#[tauri::command]
+pub async fn git_discard_paths(worktree: PathBuf, paths: Vec<String>) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+        crate::git::stage::discard_paths(&worktree, &refs)
+    })
+    .await
+    .map_err(|e| Error::Internal(format!("git_discard_paths task: {e}")))?
+}
+
+/// Stash changes for specific files via `git stash push -- <paths>`.
+#[tauri::command]
+pub async fn git_stash_push_paths(
+    worktree: PathBuf,
+    paths: Vec<String>,
+    message: Option<String>,
+) -> Result<crate::git::ops::StashPushResult> {
+    tokio::task::spawn_blocking(move || {
+        let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
+        crate::git::stage::stash_push_paths(&worktree, &refs, message.as_deref())
+    })
+    .await
+    .map_err(|e| Error::Internal(format!("git_stash_push_paths task: {e}")))?
+}
+
+/// Append a path to the worktree's `.gitignore` file.
+#[tauri::command]
+pub async fn git_ignore(worktree: PathBuf, path: String) -> Result<String> {
+    tokio::task::spawn_blocking(move || crate::git::stage::ignore_path(&worktree, &path))
+        .await
+        .map_err(|e| Error::Internal(format!("git_ignore task: {e}")))?
 }
 
 #[derive(Serialize)]

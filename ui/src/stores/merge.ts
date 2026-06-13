@@ -38,7 +38,7 @@ interface MergeState {
   /** Run the preview (called automatically on `open`). */
   runPreview: () => Promise<void>;
   /** Execute the merge via `wt merge <target>`. */
-  runMerge: (noHooks: boolean) => Promise<void>;
+  runMerge: (opts: { noHooks?: boolean; noRemove?: boolean }) => Promise<void>;
   /** Enter the conflict-resolution phase (M8). Called when `done`
    *  with conflicts, or when the user clicks "Open editor" after a
    *  post-hoc failure. */
@@ -46,7 +46,7 @@ interface MergeState {
   /** Re-run `wt merge` after all conflicts are resolved. The
    *  worktree is expected to have a clean index + working tree
    *  before this call. */
-  completeMerge: () => Promise<void>;
+  completeMerge: (opts: { noHooks?: boolean; noRemove?: boolean }) => Promise<void>;
 }
 
 export const useMergeStore = create<MergeState>((set, get) => ({
@@ -89,12 +89,17 @@ export const useMergeStore = create<MergeState>((set, get) => ({
     }
   },
 
-  runMerge: async (noHooks) => {
+  runMerge: async (opts) => {
     const { context, preview } = get();
     if (!context || !preview) return;
     set({ phase: "running", error: null });
     try {
-      const result = await wtMerge(context.worktree, context.targetBranch, noHooks);
+      const result = await wtMerge(
+        context.worktree,
+        context.targetBranch,
+        opts.noHooks ?? false,
+        opts.noRemove ?? false,
+      );
       // If `wt merge` returned conflicts (despite preview saying
       // clean, e.g. dirty workdir), jump to the resolving phase.
       const next = result.conflicts.length > 0 ? "resolving" : "done";
@@ -106,12 +111,17 @@ export const useMergeStore = create<MergeState>((set, get) => ({
 
   enterResolving: () => set({ phase: "resolving" }),
 
-  completeMerge: async () => {
+  completeMerge: async (opts) => {
     const { context } = get();
     if (!context) return;
     set({ phase: "running", error: null });
     try {
-      const result = await wtMerge(context.worktree, context.targetBranch, false);
+      const result = await wtMerge(
+        context.worktree,
+        context.targetBranch,
+        opts.noHooks ?? false,
+        opts.noRemove ?? false,
+      );
       set({ result, phase: "done" });
     } catch (e) {
       set({ phase: "error", error: parseError(e) });

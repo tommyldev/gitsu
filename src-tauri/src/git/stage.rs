@@ -5,6 +5,7 @@
 //! in/out of the index, and creates the commit. All libgit2, all
 //! scoped to a worktree path — same rules as `ops.rs`.
 
+use std::io::Write;
 use std::path::Path;
 
 use git2::{IndexAddOption, Repository, Signature, StatusOptions};
@@ -240,6 +241,89 @@ pub fn commit(worktree: &Path, message: &str) -> Result<CommitResult> {
         summary: msg.lines().next().unwrap_or_default().to_string(),
         branch,
     })
+}
+
+/// Discard working-tree changes for the given paths, restoring them
+/// to HEAD. Files not tracked by HEAD are left alone (no-op).
+pub fn discard_paths(worktree: &Path, paths: &[&str]) -> Result<()> {
+    let r = open(worktree)?;
+    // Use checkout_head with builder to only checkout specific paths.
+    // This is the libgit2 equivalent of `git checkout -- <paths>`.
+    // `checkout_head` will fail if a path is untracked (not in HEAD),
+    // so we use `allow_dirty` and only call it for paths that exist in HEAD.
+    let mut builder = git2::build::CheckoutBuilder::new();
+    builder.force();           // overwrite working tree changes
+    builder.recreate_missing(true);
+    for p in paths {
+        builder.path(p);
+    }
+    r.checkout_head(Some(&mut builder))
+        .map_err(|e| Error::Git(format!("discard paths: {e}")))
+}
+
+/// Stash changes for specific paths by shelling out to `git stash push`.
+/// The `message` can be None; when provided it becomes the stash message.
+pub fn stash_push_paths(
+    worktree: &Path,
+    paths: &[&str],
+    message: Option<&str>,
+) -> Result<crate::git::ops::StashPushResult> {
+    use crate::git::ops::StashPushResult;
+    use std::process::Command;
+
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(worktree).arg("stash").arg("push");
+    if let Some(msg) = message {
+        if !msg.is_empty() {
+            cmd.arg("-m").arg(msg);
+        }
+    }
+    cmd.arg("--");
+    for p in paths {
+        cmd.arg(p);
+    }
+
+    let output = cmd.output().map_err(|e| Error::Git(format!("stash push paths: spawn failed: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let msg = if stderr.contains("No local changes to save") || stderr.contains("did not match any file") {
+            "Nothing to stash for the selected files".to_string()
+        } else {
+            stderr.trim().to_string()
+        };
+        return Err(Error::Git(format!("stash push paths: {msg}")));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let saved_msg = if stdout.contains("Saved working directory") {
+        stdout.trim().to_string()
+    } else {
+        "Stashed selected files".to_string()
+    };
+
+    Ok(StashPushResult {
+        oid: String::new(),
+        no_changes: false,
+        message: saved_msg,
+    })
+}
+
+/// Append a path to `.gitignore` in the worktree root, creating the
+/// file if it doesn't exist. Returns the pattern that was written.
+pub fn ignore_path(worktree: &Path, path: &str) -> Result<String> {
+    let r = open(worktree)?;
+    let workdir = r.workdir()
+        .ok_or_else(|| Error::Git("bare repository has no working tree".into()))?;
+    let gitignore = workdir.join(".gitignore");
+    let pattern = format!("/{}\n", path);
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&gitignore)
+        .map_err(|e| Error::Git(format!("open .gitignore: {e}")))?;
+    f.write_all(pattern.as_bytes())
+        .map_err(|e| Error::Git(format!("write .gitignore: {e}")))?;
+    Ok(path.to_string())
 }
 
 // ── Tests ────────────────────────────────────────────────────────

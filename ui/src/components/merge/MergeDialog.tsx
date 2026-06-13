@@ -4,8 +4,8 @@
  * Three states the user sees:
  *  1. **Preview** — what's about to happen (fast-forward? conflicts?).
  *  2. **Running** — `wt merge` in flight, progress shown.
- *  3. **Done / Error** — result, with optional "remove the worktree"
- *     cleanup prompt on success.
+ * 3. **Done / Error** — result. `wt merge` removes the worktree by
+ *     default; gitsu shows a confirmation banner, not a cleanup card.
  *
  * For v1, conflicts are reported but editing is deferred to M8
  * (the 3-pane merge editor). The user can fall back to the CLI via
@@ -15,6 +15,8 @@
 import { useEffect } from "react";
 import { ArrowRight, GitMerge, X } from "lucide-react";
 import { useMergeStore } from "@/stores/merge";
+import { Body } from "./MergeViews";
+import { Footer } from "./MergeFooter";
 
 export function MergeDialog() {
   const phase = useMergeStore((s) => s.phase);
@@ -46,7 +48,7 @@ export function MergeDialog() {
         <header className="flex items-center justify-between border-b border-white/[0.06] px-5 py-3.5">
           <h2 className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-fg">
             <GitMerge size={16} className="text-accent" strokeWidth={1.5} />
-            Merge{" "}
+            Finish{" "}
             <code className="font-mono text-accent">{context.sourceBranch}</code>{" "}
             <ArrowRight size={12} className="text-fg-muted" strokeWidth={1.5} />{" "}
             <code className="font-mono text-accent">{context.targetBranch}</code>
@@ -62,11 +64,12 @@ export function MergeDialog() {
 
         <Body />
 
-        <Footer onMerge={() => runMerge(false)} />
+        <Footer
+          onFinish={() => runMerge({})}
+          onFinishKeepWorktree={() => runMerge({ noRemove: true })}
+        />
       </div>
     </div>
   );
 }
-import { Body } from "./MergeViews";
-import { Footer } from "./MergeFooter";
 
